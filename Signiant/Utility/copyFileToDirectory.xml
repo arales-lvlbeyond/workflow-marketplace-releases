@@ -1,0 +1,55 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="
+		http://levelsbeyond.com/schema/latest
+		https://s3-us-west-2.amazonaws.com/schema.levelsbeyond.com/2.3.16.17962/studio.xsd
+	"
+	id="copyFileToDirectory"
+	name="Copy File To Directory"
+	executionLabelExpression="Copy File To Directory: ${directoryPath}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	devWorkflow="true"
+	resultDataDef="resultFile"
+	sdkVersion="">
+
+	<initialStepName>copy file to directory</initialStepName>
+	
+	<copyFileStep name="copy file to directory"
+		executionLabelExpression="Copying file to directory: ${directoryPath}"
+		sourceFileExpression="${fileToCopy}"
+		targetDirectoryExpression="${directoryPath}"
+		targetFilenameExpression="${#baseFilename(fileToCopy.name)}.${#extension(fileToCopy.name)}"
+		resultDataDef="resultFile"
+		nextStep="end"
+	/>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="fileToCopy"                       dataType="File" />
+	<contextDataDef name="directoryPath"                    dataType="String" />
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="resultFile"                       dataType="File" />
+
+  
+    
+</workflow>

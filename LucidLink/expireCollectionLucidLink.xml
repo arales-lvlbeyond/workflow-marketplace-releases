@@ -1,0 +1,99 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="expireCollectionLucidLink"
+	name="Expire Collection"
+	executionLabelExpression="Lucid Link - Expire Collection - ${subject}"
+	subjectDOClassName="AssetCollection"
+	adminOnly="true"
+	group="Lucid Link"
+	showInUserInterface="true"
+	sdkVersion=""
+>
+	
+	<initialStepName>is workflow executing</initialStepName>
+	
+	
+	<queryStep name="is workflow executing"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Check to see if this workflow is currently executing"
+	>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>expire items from lucid link</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="eq">
+                            <test value="${T(org.apache.commons.lang.StringEscapeUtils).escapeXml(#this.workflow.executionLabel)}"/>
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<executeSubflowStep name="expire items from lucid link"
+		targetWorkflowId="expireLucidLink"
+		subflowExecutionLimitExpression="${subflowExecutionLimit}"
+		subjectChangePath="${collection.assetItems.![asset].?[#this.getClass().getName().endsWith('VideoClip') or #this.getClass().getName().endsWith('AssetMaster')]}"
+		nextStep="end"/>
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing"
+		reasonExpression="Workflow already executing"
+	/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="collection" dataType="Data Object" defaultDataExpression="${subject}" />
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="currentExecutions" dataType="Data Object" multiple="true"/>
+	<contextDataDef name="subflowExecutionLimit" dataType="Integer" defaultDataExpression="${#sysconfig('lucidLink.maxFileExecutions') ?: 10}"/>
+
+
+</workflow>

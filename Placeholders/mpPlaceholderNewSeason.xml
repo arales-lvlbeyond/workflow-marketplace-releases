@@ -1,0 +1,121 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="mpPlaceholderNewSeason"
+          name="New Season"
+          executionLabelExpression="Create ${numEpisodes} Episode Placeholders for ${#picklistLabel(mpMetadataFieldNameSeries,series)} Season ${#picklistLabel(mpMetadataFieldNameSeason,season)}"
+          description="Create a collection that represents an episode."
+          showInUserInterface="true"
+          group="Placeholder Creation"
+          subjectDOClassName=""
+          sdkVersion=""
+>
+
+    <initialStepName>validate episode count</initialStepName>
+
+    <noopStep
+            name="validate episode count"
+            executionLabelExpression="Validating that ${numEpisodes} is > 0 and does not exceed ${upperLimit}."
+            pctComplete="3">
+        <transition condition="${numEpisodes > 0 and numEpisodes &lt;= upperLimit}">
+            <targetStepName>create episode</targetStepName>
+        </transition>
+        <transition condition="${numEpisodes == 0}">
+            <targetStepName>zero episodes</targetStepName>
+        </transition>
+        <transition condition="${numEpisodes > upperLimit}">
+            <targetStepName>too many episodes</targetStepName>
+        </transition>
+    </noopStep>
+
+    <!--     The newEpisode workflow can and will spawn off many subflows. Only run newEpisode one at a time to prevent system from getting crushed!-->
+    <executeSubflowStep
+            name="create episode"
+            pctCompleteExpression="${(counter / numEpisodes * 100).intValue()}"
+            executionLabelExpression="Creating Episode ${counter.intValue()} Placeholders"
+            targetWorkflowId="${newEpisodeSubflowId}">
+        <transition condition="${numEpisodes > counter}">
+            <targetStepName>update counter</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="series"               subflowDataDef="series"/>
+        <subflowContextDataMapping parentDataDef="season"               subflowDataDef="season"/>
+        <subflowContextDataMapping parentDataDef="provider"             subflowDataDef="provider"/>
+        <subflowContextDataMapping parentDataDef="episodeNumber"        subflowDataDef="episodeNumber"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="languages"            subflowDataDef="languages"/>
+        <subflowContextDataMapping parentDataDef="containsForcedList"   subflowDataDef="containsForcedList"/>
+    </executeSubflowStep>
+
+    <setContextData
+            name="update counter"
+            executionLabelExpression="Counter = ${counter}, episodeNumber = ${#picklistLabel(mpMetadataFieldNameEpisodeNumber, episodeNumber)}"
+            targetDataDef="counter"
+            valueExpression="${counter + 1}"
+            nextStep="create episode">
+        <set targetDataDef="episodeNumber" valueExpression="${#picklistLabel(mpMetadataFieldNameEpisodeNumber, counter.intValue())}"/>
+    </setContextData>
+
+    <!-- ................................................... End Steps .................................................... -->
+
+    <!-- success -->
+    <noopStep name="end" executionLabelExpression="Finished creating ${numEpisodes} Episode placeholders."/>
+
+    <!-- fail -->
+    <failWorkflowStep name="zero episodes"      executionLabelExpression="Nothing to do." reasonExpression="Zero Episodes"/>
+    <failWorkflowStep name="too many episodes"  executionLabelExpression="Upper limit of episodes to create at once is ${upperLimit}. Please try again." reasonExpression="Too Many Episodes"/>
+
+
+    <!-- ................................................... Data Defs .................................................... -->
+
+    <!-- ............ INPUT ............. -->
+
+    <contextDataDef name="metadataForm"             dataType="MetadataForm"     userInput="true"    required="true"     label="Metadata Form"/>
+    <contextDataDef name="metadataFormType"         dataType="String"           defaultDataExpression="access">
+        <description>
+            TEMPORARY!!! (Forms will be standardized to the same format in the future)
+            Valid types = "access" or "panel"
+        </description>
+    </contextDataDef>
+
+    <contextDataDef name="series"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameSeries)?.asText()}"/>
+    <contextDataDef name="season"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameSeason)?.asText()}"/>
+    <contextDataDef name="provider"                 dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameProvider)?.asText()}"/>
+    <contextDataDef name="numEpisodes"              dataType="Integer"          defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameNumberOfEpisodes)?.asInt()}"/>
+    <contextDataDef name="format"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameNumberOfFormat)?.asText()}"/>
+    <contextDataDef name="containsForcedList"       dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameContainsForcedNarrative)?.asText()}"/>
+    <contextDataDef name="languages"                dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameLanguages)}"  multiple="true"/>
+
+    <!-- ......... PROCESSING ........... -->
+
+    <!-- metadata field/property names -->
+    <contextDataDef name="mpMetadataFieldNameSeries"                            dataType="String"           defaultDataExpression="${'mpPlaceholderSeries'}"/>
+    <contextDataDef name="mpMetadataFieldNameSeason"                            dataType="String"           defaultDataExpression="${'mpPlaceholderSeason'}"/>
+    <contextDataDef name="mpMetadataFieldNameProvider"                          dataType="String"           defaultDataExpression="${'mpPlaceholderProvider'}"/>
+    <contextDataDef name="mpMetadataFieldNameNumberOfEpisodes"                  dataType="String"           defaultDataExpression="${'mpPlaceholderNumberOfEpisodes'}"/>
+    <contextDataDef name="mpMetadataFieldNameNumberOfFormat"                    dataType="String"           defaultDataExpression="${'mpPlaceholderFormat'}"/>
+    <contextDataDef name="mpMetadataFieldNameContainsForcedNarrative"           dataType="String"           defaultDataExpression="${'mpPlaceholderContainsForcedNarrative'}"/>
+    <contextDataDef name="mpMetadataFieldNameLanguages"                         dataType="String"           defaultDataExpression="${'mpPlaceholderLanguages'}"/>
+    <contextDataDef name="mpMetadataFieldNameEpisodeNumber"                     dataType="String"           defaultDataExpression="${'mpPlaceholderEpisodeNumber'}"/>
+
+    <!--Subflows-->
+    <contextDataDef name="newEpisodeSubflowId"    	dataType="String" 		    defaultDataExpression="mpPlaceholderNewEpisode" />
+
+    <!--General-->
+    <contextDataDef name="counter"                  dataType="Double"           defaultDataExpression="1"/>
+    <contextDataDef name="episodeNumber"            dataType="String"           defaultDataExpression="${#picklistValue(mpMetadataFieldNameEpisodeNumber, counter.intValue())}"/>
+    <contextDataDef name="upperLimit"               dataType="Integer"          defaultDataExpression="30"/>
+
+    <!--JSON-->
+    <contextDataDef name="jsonMetadata"             dataType="JSON">
+        <description>
+            Single JSON where:
+            Keys are metadata property names
+            Values are what to set the matching property to on this asset
+        </description>
+    </contextDataDef>
+    
+</workflow>

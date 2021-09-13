@@ -1,0 +1,143 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow-1.2.xsd"
+	id="createPlaceholder"
+	name="Create Placeholder"
+	description=""
+	executionLabelExpression="create placeholder with name ${assetName}"
+	deadlineExpression=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	resultDataDef="placeholderAsset"
+
+>
+	<initialStepName>is workflow executing</initialStepName>
+	
+	
+	<!-- ................................................... Initial Checks .................................................... -->
+	
+	<queryStep name="is workflow executing"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Check to see if this workflow is currently executing"
+	>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>create placeholder</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	
+	<groovyStep name="create placeholder"
+		executionLabelExpression="${#this.name} - Execution Time: ${T(String).valueOf(#this.getEndDate().getTime() - #this.getStartDate().getTime())}ms --- Time To First Step Overhead: ${T(String).valueOf(#this.getStartDate().getTime() - #root.getStartDate().getTime())}ms"
+		resultDataDef="placeholderAsset"
+	>
+		<script>
+                <![CDATA[
+			import com.routeto1.spring.ApplicationContextHolder
+			import com.levelsbeyond.resource.asset.placeholder.PlaceholderAssetDTO
+			import com.levelsbeyond.service.inventory.reference.InventoryReferenceService
+			import com.levelsbeyond.service.inventory.PlaceholderAssetService
+			import com.levelsbeyond.persistence.domain.asset.type.InventoryAssetType
+			import com.routeto1.asset.filesystem.AssetMaster
+			import com.routeto1.services.asset.AssetService
+			
+			InventoryReferenceService inventoryReferenceService = ApplicationContextHolder.getApplicationContext().getBean(InventoryReferenceService.class)
+			PlaceholderAssetService placeholderAssetService = ApplicationContextHolder.getApplicationContext().getBean(PlaceholderAssetService.class)
+			AssetService assetService = ApplicationContextHolder.getApplicationContext().getBean(AssetService.class)
+			
+			InventoryAssetType inventoryAssetType = inventoryReferenceService.getAssetTypeForKey(placeholderType)
+			PlaceholderAssetDTO placeholderAsset = PlaceholderAssetDTO.builder().setName(assetName).setInventoryAssetType(inventoryAssetType.name()).build()
+			PlaceholderAssetDTO createdPlaceholderAsset = placeholderAssetService.create(placeholderAsset)
+			AssetMaster assetMaster = assetService.getAsset(createdPlaceholderAsset.getId(), AssetMaster.class)
+			return assetMaster
+			]]>
+			</script>
+		
+		<transition condition="${setSomeMetadata}">
+			<targetStepName>save metadata on placeholder asset</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</groovyStep>
+	
+	<saveDataObjectStep name="save metadata on placeholder asset"
+		executionLabelExpression="Saving metadata on placeholder"
+		dataObjectExpression="${placeholderAsset.metadata}"
+		jsonValuesDataDef="jsonMetadata"
+		nextStep="end" />
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	
+	<noopStep name="end"/>
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing on the directory"
+		reasonExpression="Workflow already executing on the directory"
+	/>
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- .......... Input Variables .......... -->
+	<contextDataDef name="assetName"        dataType="String" label="1. Asset Name"         userInput="true" required="true"/>
+	<contextDataDef name="placeholderType"  dataType="String" label="2. Placeholder Type"   userInput="true" required="true">
+		<picklist>
+			<picklistItem value="video" label="Video"/>
+			<picklistItem value="audio" label="Audio"/>
+			<picklistItem value="image" label="Image"/>
+			<picklistItem value="document" label="Document"/>
+		</picklist>
+	</contextDataDef>
+	<!-- .......... Optional Input Variables .......... -->
+	<contextDataDef name="setSomeMetadata"  dataType="Boolean" defaultDataExpression="true"/>
+	<contextDataDef name="jsonMetadata"     dataType="JSON"     defaultDataExpression="{}" />
+	
+	<!-- ....... Processing Variables ........ -->
+	<contextDataDef name="currentExecutions"    dataType="Data Object"  multiple="true"/>
+	<contextDataDef name="placeholderAsset" dataType="Data Object"/>
+
+</workflow>

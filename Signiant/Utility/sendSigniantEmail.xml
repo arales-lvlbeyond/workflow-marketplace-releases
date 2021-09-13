@@ -1,0 +1,57 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+		id="sendSigniantEmail"
+		name="Send Signiant Email"
+		executionLabelExpression="Send Signiant MediaShuttle Email"
+		description=""
+		showInUserInterface="false"
+		subjectDOClassName=""
+		subjectQualifierExpression=""
+		sdkVersion="">
+	
+	<initialStepName>send email</initialStepName>
+	
+	<emailStep name="send email"
+			executionLabelExpression="Sending Email to ${emailAddresses}"
+			emailAddressesExpression="${emailAddresses}"
+			subjectExpression="MediaShuttle Transfer Link"
+			nextStep="end">
+		<body><![CDATA[<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+		<body>
+		<table>
+			<td style="width:600px; font-family: Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size: 14px; text-align: center;">
+				<div style="background-color:black;"><img
+						src="https://www.reachengine.com/hs-fs/hubfs/REbyLB_CMYK_1000x400_white_text.png"
+						alt="Logo" style="width:150px;"></div>
+				<hr>
+				<div>
+					<h1>Your team needs you!</h1>
+					<p>You have received the following Signiant MediaShuttle transfer link:</p>
+				</div>
+				<div><a href="${transferLink}" style="background-color: #1188e6; font-size: 16px; font-family: Roboto, RobotoDraft, Helvetica, Arial, sans-serif; color: #ffffff; padding: 12px 18px 12px 18px; text-decoration: none; border-radius: 6px; border: 1px solid #1288e5; display: inline-block;" target="_blank">Click Here</a></div>
+				<div>
+					<p>This link will expire on: <b>${#formatDate('yyyy-MM-dd', expirationDate)}T00:00:00.000Z</b></p>
+				</div>
+				<div style="font-size:12px;text-align:left;">
+					<hr>
+					<p>If you're having problems accessing this link, please contact your <a
+							href="mailto:">IT Support</a></p>
+				</div>
+			</td>
+		</table>
+		</body>
+		</html>]]></body>
+	</emailStep>
+	
+	<noopStep name="end"/>
+	
+	<!-- Input -->
+	<contextDataDef name="expirationDate"       label="Expiration Date"      dataType="Date/Time"    userInput="true"    required="true" displayIndex="1"/>
+	<contextDataDef name="emailAddresses" label="Recipient Emails" dataType="Email" userInput="true" required="true" multiple="true" displayIndex="2"/>
+	
+	<!-- Internal -->
+	<contextDataDef name="transferLink" dataType="String"/>
+
+</workflow>

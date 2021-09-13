@@ -1,0 +1,136 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="transferCollectionViaMediaShuttle"
+    name="Transfer Collection via Signiant Media Shuttle"
+    executionLabelExpression="Transfer Collection via Media Shuttle | Collection: ${subject.name}"
+    subjectDOClassName="AssetCollection"
+    showInUserInterface="true"
+    sdkVersion=""
+    resultDataDef=""
+>
+    
+    <initialStepName>create empty package</initialStepName>
+    
+    
+    <executeSubflowStep name="create empty package"
+        targetWorkflowId="createEmptyMediaShuttlePackage"
+        executionLabelExpression="Creating Empty Media Shuttle Package"
+        resultDataDef="portalAndPackage"
+        nextStep="set portal and package ids"
+        pctComplete="15">
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+    </executeSubflowStep>
+    
+    <setContextData name="set portal and package ids"
+        executionLabelExpression="Portal ID: ${portalId}, Package ID: ${packageId}"
+        nextStep="add content to package"
+        pctComplete="30">
+        
+        <set targetDataDef="portalId" valueExpression="${portalAndPackage.get('portalId').asText()}"/>
+        <set targetDataDef="packageId" valueExpression="${portalAndPackage.get('packageId').asText()}"/>
+    </setContextData>
+    
+    <!--add file to package-->
+    <executeSubflowStep name="add content to package"
+        targetWorkflowId="addCollectionContentToMediaShuttlePackage"
+        subjectChangePath="${subject}"
+        executionLabelExpression="Adding ${contentUse} content to Media Shuttle Package"
+        nextStep="create transfer token"
+        pctComplete="75">
+        <subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+        <subflowContextDataMapping parentDataDef="packageId" subflowDataDef="packageId"/>
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+        <subflowContextDataMapping parentDataDef="contentUse" subflowDataDef="contentUse" />
+    </executeSubflowStep>
+    
+    <!--create token-->
+    <executeSubflowStep name="create transfer token"
+        executionLabelExpression="Create package transfer token for package id ${packageId}"
+        targetWorkflowId="createPackageTransferToken"
+        subjectChangePath="${emailAddresses}"
+        subflowTargetDataDef="userEmail"
+        resultDataDef="transferLink"
+        nextStep="end"
+        pctComplete="85">
+        <subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+        <subflowContextDataMapping parentDataDef="packageId" subflowDataDef="packageId"/>
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+        <subflowContextDataMapping parentDataDef="expirationDate" subflowDataDef="expirationDate"/>
+        <subflowContextDataMapping parentDataDef="grantToken" subflowDataDef="grantToken"/>
+    </executeSubflowStep>
+    
+    <noopStep name="end"/>
+    
+    <createFailureNotificationStep name="conversion template not found notification"
+        executionLabelExpression="Conversion template not found"
+        notificationTypeExpression="error"
+        notificationBodyExpression="Vantage template is null. Please select a valid Vantage template."
+        nextStep="conversion template not found"/>
+    
+    <createFailureNotificationStep name="content use should be other if template specified notification"
+        executionLabelExpression="Content use should be 'OTHER' if template is specified."
+        notificationTypeExpression="error"
+        notificationBodyExpression="Content use should be 'OTHER' if template is specified."
+        nextStep="content use should be other if template specified"/>
+    
+    <failWorkflowStep name="conversion template not found"
+        executionLabelExpression="Vantage template is null. Please select a valid Vantage template."
+        reasonExpression="Vantage template is null. Please select a valid Vantage template."
+    />
+    
+    <failWorkflowStep name="content use should be other if template specified"
+        executionLabelExpression="Content use should be 'OTHER' if template is specified."
+        reasonExpression="Content use should be 'OTHER' if template is specified."
+    />
+    
+    <!-- .................................................. Context Data Defs .................................................. -->
+    
+    <!--inputs-->
+    <contextDataDef name="expirationDate"       label="Expiration Date (max 30 days)"      dataType="Date/Time"    userInput="true"    required="true" displayIndex="1"/>
+    
+    <contextDataDef name="emailAddresses" label="Recipient Emails" dataType="Email" userInput="true" required="true" multiple="true" displayIndex="2"/>
+    
+    <contextDataDef name="contentUse"           label="Content Use"          dataType="String"       userInput="true"    required="true" displayIndex="3">
+        <picklist>
+            <picklistItem value="SOURCE" label="Source" index="1"/>
+            <picklistItem value="MEZZANINE" label="Mezzanine" index="2"/>
+            <picklistItem value="PROXY" label="Proxy" index="3"/>
+        </picklist>
+    </contextDataDef>
+    
+    <!--processing-->
+    <contextDataDef name="portalId" dataType="String"/>
+    <contextDataDef name="packageId" dataType="String"/>
+    <contextDataDef name="portalAndPackage" dataType="JSON"/>
+    <contextDataDef name="transferLink" dataType="String"/>
+    <contextDataDef name="grantToken" dataType="String" defaultDataExpression="download"/>
+    
+    <!--defaults-->
+    <contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+    <contextDataDef name="targetContent" dataType="Data Object" multiple="true" defaultDataExpression="${contentUse.equals('SOURCE') ? subject.assetItems.asset.originalContent : contentUse.equals('MEZZANINE') ? subject.assetItems.asset.mezzanine : subject.assetItems.asset.proxy}"/>
+
+</workflow>

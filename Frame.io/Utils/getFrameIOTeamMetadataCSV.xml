@@ -1,0 +1,159 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	id="getFrameIOTeamMetadataCSV"
+	name="getFrameIOTeamMetadataCSV"
+	executionLabelExpression="getFrameIOTeamMetadataCSV - ${account_id}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	adminOnly="true"
+	resultDataDef="result"
+	hasDownload="true"
+	sdkVersion="">
+
+	<initialStepName>get account teams</initialStepName>
+	
+	<submitHttpStep name="get account teams"
+		urlExpression="https://api.frame.io/v2/accounts/${account_id}/teams"
+		responseCodeDataDef="responseCode"
+		responsePayloadDataDef="responsePayload"
+		requestMethodExpression="GET"
+	>
+		<transition condition="${responseCode.startsWith('2')}">
+			<targetStepName>build metadata import csv</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>request failed</targetStepName>
+		</transition>
+		
+		<requestHeader name="Authorization">Bearer ${bearerToken}</requestHeader>
+
+	</submitHttpStep>
+	
+	<groovyStep name="build metadata import csv"
+		resultDataDef="result"
+	>
+		<transition condition="${ resultFile.exists() }">
+			<targetStepName>send result file</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>request failed</targetStepName>
+		</transition>
+		<script>
+			<![CDATA[
+				import groovy.json.*
+				import groovy.json.JsonSlurper
+				import com.csvreader.CsvWriter
+				import com.csvreader.CsvReader
+				
+				
+				def list = []
+				
+				responsePayload.each { team ->
+					def teamMap = new JsonSlurper().parseText(team.toString())
+					def map = [:]
+					
+					map.Value = teamMap.get('id').replace('-', '')
+					map.Label = teamMap.get('name')
+					list.add(map)
+				}
+				
+				writeToCSV(list, resultFile.absolutePath, [])
+				
+				// Helper functions
+				boolean writeToCSV (entries, resultFileLocation, additionalHeaders) {
+					try {
+						def file = new File(resultFileLocation)
+						println(file)
+						
+						char delimiter = ','
+						def fileWriter = new FileWriter(resultFileLocation, true)
+						
+						CsvWriter csvFilePrinter = new CsvWriter(fileWriter, delimiter)
+						
+						// add headers
+						entries[0].eachWithIndex { entry, index ->
+							csvFilePrinter.write(entry.key)
+						}
+//
+						// add additional headers, if any
+						if (!additionalHeaders.isEmpty()) {
+							additionalHeaders.eachWithIndex { header, index ->
+								csvFilePrinter.write(header)
+							}
+						}
+						csvFilePrinter.endRecord()
+
+						// add entries per column
+						entries.each { entry ->
+							entry.eachWithIndex { rowEntry, index ->
+								csvFilePrinter.write(rowEntry.value)
+							}
+							csvFilePrinter.endRecord()
+						}
+						csvFilePrinter.endRecord()
+						csvFilePrinter.close()
+						return true
+					
+					} catch (Exception e) {
+						println(e)
+						e.printStackTrace()
+						retun e
+					}
+				}
+				
+				return list
+			]]>
+		</script>
+	</groovyStep>
+	
+	<emailStep name="send result file"
+		emailAddressesExpression="${email}" subjectExpression="csv metadata"
+		attachmentsExpression="${resultFile}"
+		nextStep="end"
+	>
+		<body>download attached</body>
+	</emailStep>
+	
+	<setWorkflowDownloadStep name="download file" 
+		sourceFileExpression="${resultFile}"
+		nextStep="end"
+	/>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<failWorkflowStep name="request failed"
+		reasonExpression="request failed"
+	/>
+	
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="account_id"               dataType="String"   userInput="true"    required="true" />
+	<contextDataDef name="bearerToken"              dataType="String"   userInput="true"    required="true" />
+	<contextDataDef name="email"                    dataType="String"   label="Email to Send CSV to:" userInput="true"  required="true" />
+	<contextDataDef name="resultFile"               dataType="File"     defaultDataExpression="${ #sysconfig('filesystem.root.temp') + '/' + account_id }_${#uuid()}.csv" />
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="responseCode"             dataType="String" />
+	<contextDataDef name="responsePayload"          dataType="JSON"     multiple="true"/>
+	
+	<contextDataDef name="result"                   dataType="String"     multiple="false" />
+	
+    
+</workflow>

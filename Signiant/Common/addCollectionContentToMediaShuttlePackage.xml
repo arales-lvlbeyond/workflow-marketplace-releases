@@ -1,0 +1,293 @@
+
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="addCollectionContentToMediaShuttlePackage"
+	name="Add Collection Content to Media Shuttle Package"
+	executionLabelExpression="Add Collection Content to Media Shuttle Package"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+	resultDataDef=""
+>
+	
+	<initialStepName>get storage type</initialStepName>
+	
+	
+	<executeSubflowStep name="get storage type"
+		targetWorkflowId="getStorageType"
+		executionLabelExpression="Get storage type"
+		resultDataDef="storageType"
+	>
+		<subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+		<subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+		<subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+		
+		<transition condition="${storageType.get('type').asText() == 's3'}">
+			<targetStepName>set s3 bucket and prefix</targetStepName>
+		</transition>
+		<transition condition="${storageType.get('type').asText() == 'local'}">
+			<targetStepName>get portal storage repo</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>error storage type</targetStepName>
+		</transition>
+	</executeSubflowStep>
+	
+	
+	<submitHttpStep name="get portal storage repo"
+		urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/storage"
+		requestMethodExpression="GET"
+		responseCodeDataDef="getStorageResponseCode"
+		responsePayloadDataDef="getStorageResponse"
+		executionLabelExpression="Requesting Storage for Portal: ${portalId}"
+	>
+		<transition condition="${getStorageResponseCode.startsWith('2')}">
+			<targetStepName>set storage repo path</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to retrieve storage</targetStepName>
+		</transition>
+		
+		<requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+	</submitHttpStep>
+	
+	
+	<!-- COPY TARGET CONTENT TO DESTINATION -->
+	<!-- S3 storage -->
+	<setContextData name="set s3 bucket and prefix"
+		executionLabelExpression="Set S3 bucket and prefix"
+		devStep="true"
+		nextStep="set target path"
+	>
+		<set targetDataDef="s3Bucket" valueExpression="${storageType.get('configuration').get('bucket').asText()}" />
+		<set targetDataDef="s3Prefix" valueExpression="${storageType.get('configuration').get('filePrefix').asText()}" />
+		<set targetDataDef="assetsToCopy">${subject.assetItems.![asset]}</set>
+	</setContextData>
+	
+	<setContextData name="set target path"
+		valueExpression="s3://${s3Bucket}/${s3Prefix}${packageId}/"
+		targetDataDef="targetPath" >
+		<transition condition="${contentUse == 'SOURCE'}">
+			<targetStepName>set source info</targetStepName>
+		</transition>
+		<transition condition="${contentUse == 'MEZZANINE'}">
+			<targetStepName>set mezzanine info</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>set proxy info</targetStepName>
+		</transition>
+	</setContextData>
+	
+	
+	<!-- If contentUse == SOURCE -->
+	<setContextData name="set source info"
+		nextStep="copy files to s3 repo">
+		<set targetDataDef="fileToCopy">${assetsToCopy.![originalContent]}</set>
+		<set targetDataDef="targetDir">${#mapPathReverse( targetPath, 's3mapping')}</set>
+	</setContextData>
+	
+	<!-- If contentUse == MEZZANINE -->
+	<setContextData name="set mezzanine info"
+		nextStep="copy files to s3 repo">
+		<set targetDataDef="fileToCopy">${assetsToCopy.![mezzanine]}</set>
+		<set targetDataDef="targetDir">${#mapPathReverse( targetPath, 's3mapping')}</set>
+	</setContextData>
+	
+	<!-- If contentUse == PROXY -->
+	<setContextData name="set proxy info"
+		nextStep="copy files to s3 repo">
+		<set targetDataDef="fileToCopy">${assetsToCopy.![proxy]}</set>
+		<set targetDataDef="targetDir">${#mapPathReverse( targetPath, 's3mapping')}</set>
+	</setContextData>
+	
+	<executeSubflowStep name="copy files to s3 repo"
+		targetWorkflowId="copyFile"
+		subjectChangePath="${fileToCopy}"
+		resultDataDef="resultFile" >
+		<transition condition="${resultFile.exists()}">
+			<targetStepName>construct json body</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>file does not exist</targetStepName>
+		</transition>
+		<subflowContextDataMapping parentDataDef="targetDir"  subflowDataDef="targetDir"  />
+	</executeSubflowStep>
+	
+	
+	
+	<!-- Local storage -->
+	<setContextData name="set storage repo path"
+		executionLabelExpression="Set storage repo path"
+		targetDataDef="storageRepo"
+		valueExpression="${getStorageResponse.get('repositoryPath').asText()}"
+		nextStep="set destination path variable" />
+	
+	<setContextData name="set destination path variable"
+		targetDataDef="destDirectory"
+		valueExpression="${storageRepo}/${exportPath}/${packageId}"
+		nextStep="make destination repo"
+		devStep="true"
+	/>
+	
+	
+	<runCommandStep name="make destination repo"
+		executionLabelExpression="Create destination directory | ${destDirectory}"
+		executablePathExpression="/bin/mkdir"
+		nextStep="copy file to local repo"
+	>
+		<arg>-p</arg>
+		<arg>${destDirectory}</arg>
+	</runCommandStep>
+	
+	
+	<copyFileStep name="copy file to local repo"
+		executionLabelExpression="Copy ${subject.name} to Local destination path"
+		sourceFileExpression="${assetsToCopy}"
+		targetDirectoryExpression="${destDirectory}"
+		resultDataDef="copiedFile"
+	>
+		
+		<transition condition="${copiedFile.exists()}">
+			<targetStepName>construct json body</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>copy failed</targetStepName>
+		</transition>
+	</copyFileStep>
+	
+	
+	<!-- BUILD JSON PAYLOAD -->
+	<groovyStep name="construct json body"
+		resultDataDef="contentBody"
+		executionLabelExpression="Constructing MediaShuttle content JSON payload"
+		nextStep="add content to media shuttle package"
+	>
+		<script>
+            <![CDATA[
+			import groovy.json.JsonBuilder;
+			
+			def jsonBuilder = new groovy.json.JsonBuilder()
+			
+			jsonBuilder {
+				files assetContentToCopy.collect {
+					[
+						path: it.file.name,
+						size: it.fileSize,
+						isDirectory: "false"
+					]
+				}
+			}
+
+			
+			]]>
+		</script>
+	</groovyStep>
+	
+	<!-- ADD CONTENT TO MEDIA SHUTTLE PACKAGE -->
+	<submitHttpStep name="add content to media shuttle package"
+		urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/packages/${packageId}/files"
+		requestMethodExpression="PUT"
+		responseCodeDataDef="putPackageContentResponseCode"
+		responsePayloadDataDef="putPackageContentResponse"
+		executionLabelExpression="Adding ${subject.name} to Package Id ${packageId}"
+	>
+		<transition condition="${putPackageContentResponseCode.startsWith('2')}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to add content to package</targetStepName>
+		</transition>
+		
+		<requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+		<requestPayloadItem name="body">${contentBody.toString()}</requestPayloadItem>
+	</submitHttpStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- fail steps -->
+	<failWorkflowStep name="failed to add content to package"
+		executionLabelExpression="Failed to add content, received code ${putPackageContentResponseCode}"
+		reasonExpression="Response: ${putPackageContentResponse.asText()}"/>
+	
+	<failWorkflowStep name="failed to retrieve storage"
+		executionLabelExpression="Failed to add content, received code ${getStorageResponseCode}"
+		reasonExpression="Response: ${getStorageResponse.asText()}"/>
+	
+	<failWorkflowStep name="error storage type"
+		reasonExpression="Storage type: ${storageType}"
+		executionLabelExpression="Could not determine storage type"
+	/>
+	
+	<failWorkflowStep name="file does not exist"
+		reasonExpression="Failed to Copy file to output Directory"
+		executionLabelExpression="Failed to Copy file to output Directory" />
+	
+	<failWorkflowStep name="copy failed"
+		executionLabelExpression="Failed to copy ${subject.name} to ${destDirectory}"
+		reasonExpression="Failed to copy ${subject.name} to ${destDirectory}"
+	/>
+	
+	
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<!-- .................................................. Context Data Defs .................................................. -->
+	<!-- Input -->
+	<contextDataDef name="portalId"                         dataType="String"/>
+	<contextDataDef name="packageId"                        dataType="String"/>
+	<contextDataDef name="mediaShuttleApiKey"               dataType="String"           hidden="true"/>
+	<contextDataDef name="baseMediaShuttlePortalsUrl"       dataType="String"/>
+	
+	<!-- Processing -->
+	<contextDataDef name="subjectName"                      dataType="String"      multiple="true"     defaultDataExpression="${contentUse.equals('SOURCE') ? assetsToCopy.originalContent.file.name : contentUse.equals('MEZZANINE') ? assetsToCopy.mezzanine.file.name : assetsToCopy.proxy.file.name}" />
+	<contextDataDef name="subjectSize"                      dataType="String"      multiple="true"     defaultDataExpression="${contentUse.equals('SOURCE') ? assetsToCopy.originalContent.fileSize : contentUse.equals('MEZZANINE') ? assetsToCopy.mezzanine.fileSize : assetsToCopy.proxy.fileSize}" />
+	
+	<contextDataDef name="storageType"                      dataType="JSON" />
+	<contextDataDef name="getStorageResponseCode"           dataType="String"/>
+	<contextDataDef name="getStorageResponse"               dataType="JSON"/>
+	<contextDataDef name="storageRepo"                      dataType="String" />
+	
+	<contextDataDef name="s3Bucket"                         dataType="String" />
+	<contextDataDef name="s3Prefix"                         dataType="String" />
+	
+	<contextDataDef name="putPackageContentResponseCode"    dataType="String"/>
+	<contextDataDef name="putPackageContentResponse"        dataType="JSON"/>
+	
+	<contextDataDef name="contentBody"                      dataType="JSON" />
+	<contextDataDef name="resultFile"                       dataType="File" />
+	<contextDataDef name="targetPath"                       dataType="String" />
+	
+	<contextDataDef name="destDirectory"                    dataType="String" />
+	<contextDataDef name="copiedFile"                       dataType="File" />
+	
+	<contextDataDef name="contentUse"                       dataType="String"   />
+	
+	<contextDataDef name="assetsToCopy"                     dataType="Data Object"     multiple="true" />
+	
+	<contextDataDef name="assetContentToCopy"               dataType="Data Object"      multiple="true"     defaultDataExpression="${contentUse.equals('SOURCE') ? assetsToCopy.![originalContent] : contentUse.equals('MEZZANINE') ? assetsToCopy.![mezzanine] : assetsToCopy.![proxy]}" />
+	
+	<contextDataDef name="fileToCopy"                       dataType="Data Object"     multiple="true" />
+	<contextDataDef name="targetDir"                        dataType="String"   />
+	<!-- Dynamic Props -->
+	<contextDataDef name="exportPath"                       dataType="String"           defaultDataExpression="${#sysconfig('media.shuttle.export.path')}" />
+
+</workflow>

@@ -1,0 +1,129 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	id="transferAssetToReach"
+	name="Transfer Asset to Target Reach System"
+	executionLabelExpression="Transfer Asset to ${targetSystem}"
+	subjectDOClassName="AssetMaster"
+	showInUserInterface="true"
+	adminOnly="true"
+	sdkVersion="">
+
+	<initialStepName>extract target system creds</initialStepName>
+	
+	<!--@TODO: hide these context values from ui-->
+	<setContextData name="extract target system creds"
+		executionLabelExpression="Getting creds for ${targetSystem}"
+		nextStep="build request body"
+	>
+		<set targetDataDef="auth_user"              valueExpression="${ reachCreds.get(targetSystem).get('auth_user').asText() }"/>
+		<set targetDataDef="auth_password"          valueExpression="${ reachCreds.get(targetSystem).get('auth_password').asText() }"/>
+		<set targetDataDef="reach_url"              valueExpression="${ reachCreds.get(targetSystem).get('reach_url').asText() }"/>
+		<set targetDataDef="apiKey"                 valueExpression="${ reachCreds.get(targetSystem).get('apiKey').asText() }"/>
+	</setContextData>
+	
+	<!-- @TODO: Determine method to identify system this workflow is being run on to pass in as 'sourceSystem' automatically -->
+	<groovyStep name="build request body"
+		resultDataDef="requestBody"
+		nextStep="create placeholder on target system"
+	>
+		<script>
+			<![CDATA[
+				import groovy.json.JsonSlurper
+				import groovy.json.JsonOutput
+				
+				groovy.json.JsonSlurper
+				
+				def map = [:]
+				map.sourceSystem = 'Source Test'
+				map.jsonMetadata = new JsonSlurper().parseText(jsonMetadata.toString())
+				map.assetName = asset.name
+				map.assetType = asset.assetType
+			
+				return JsonOutput.toJson(map)
+			]]>
+		</script>
+	</groovyStep>
+	
+	<!-- Create Placeholder Asset on target system -->
+	<executeSubflowStep name="create placeholder on target system"
+		executionLabelExpression="Create placeholder asset on ${targetSystem} - URL: ${reach_url}"
+		targetWorkflowId="runRemoteWorkflowAndMonitor"
+		subjectChangePath="${reach_url}"
+		subflowTargetDataDef="remoteReachEngineAddress"
+		resultDataDef="remoteWFStatus"
+	>
+		<transition condition="${remoteWFStatus.equals('COMPLETED')}">
+			<targetStepName>determine transfer protocol</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to run remote workflow</targetStepName>
+		</transition>
+		<subflowContextDataMapping parentDataDef="remotePlaceholderWorkflowId"      subflowDataDef="remoteWorkflowId"/>
+		<subflowContextDataMapping parentDataDef="auth_user"                        subflowDataDef="remoteUser"/>
+		<subflowContextDataMapping parentDataDef="auth_password"                    subflowDataDef="remoteUserPassword"/>
+		<subflowContextDataMapping parentDataDef="requestBody"                      subflowDataDef="workflowRequestBody"/>
+	</executeSubflowStep>
+	
+	<noopStep name="determine transfer protocol" />
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- failures -->
+	<failWorkflowStep name="failed to run remote workflow"
+		executionLabelExpression="Workflow failed at target Reach Engine: ${targetSystem}. See subflow call to ${targetSystem} and contact a Reach administrator at the ${targetSystem} to investigate."
+		reasonExpression="Workflow failed at target Reach Engine: ${targetSystem}. See subflow call to ${targetSystem} and contact a Reach administrator at the ${targetSystem} to investigate."
+	/>
+	
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="asset"                            dataType="Data Object"      defaultDataExpression="${subject}" />
+	<contextDataDef name="targetSystem"                     dataType="String"           userInput="true"    required="true">
+		<picklist>
+			<picklistItem label="SoFi" value="SoFi"/>
+		</picklist>
+	</contextDataDef>
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="auth_user"                        dataType="String" />
+	<contextDataDef name="auth_password"                    dataType="String" />
+	<contextDataDef name="reach_url"                        dataType="String" />
+	<contextDataDef name="apiKey"                           dataType="String" />
+	<contextDataDef name="requestBody"                      dataType="JSON" />
+	<contextDataDef name="remoteWFStatus"                   dataType="String"       />
+	<contextDataDef name="jsonMetadata"                     dataType="JSON"             defaultDataExpression="${ #getAssetMetadata(asset) }" />
+	<!-- Configs -->
+	<contextDataDef name="remotePlaceholderWorkflowId"      dataType="String"           defaultDataExpression="createPlaceholderAsset" />
+	<contextDataDef name="reachCreds"                       dataType="JSON"             hidden="true" >
+		<defaultDataExpression>
+			<![CDATA[
+				{
+					"SoFi" : {
+						"reach_url" : "https://sofi.reachengine.com",
+						"auth_user" : "system",
+						"auth_password" : "password",
+						"apiKey" : "3ca38545-2e6f-4a91-8d01-9c267bea33fd"
+					}
+				}
+			]]>
+		</defaultDataExpression>
+	</contextDataDef>
+	
+	
+    
+</workflow>

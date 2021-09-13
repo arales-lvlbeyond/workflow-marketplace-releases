@@ -1,0 +1,369 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="synchronizePackage"
+	name="Synchronize Package"
+	executionLabelExpression="Synchronizing Package with Reach Engine | Package ID: ${packageId}"
+	showInUserInterface="false"
+	subjectDOClassName=""
+	sdkVersion=""
+	devWorkflow="true"
+>
+    
+    <initialStepName>check for portalId</initialStepName>
+    
+    <noopStep name="check for portalId"
+	    executionLabelExpression="Checking if package is a previously unfinished ingest"
+	    devStep="true"
+    >
+        <transition condition="${portalId != null}">
+            <targetStepName>check upload status</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>get portal id</targetStepName>
+        </transition>
+    </noopStep>
+    
+   <executeSubflowStep name="get portal id"
+	   targetWorkflowId="getMediaShuttlePortal"
+	   executionLabelExpression="Get Media Shuttle portal"
+	   resultDataDef="portalId"
+   >
+        <transition condition="${portalId != null}">
+            <targetStepName>check upload status</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to retrieve portal id</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+    </executeSubflowStep>
+    
+    <submitHttpStep name="check upload status"
+	    urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/packages/${packageId}/events"
+	    requestMethodExpression="GET"
+	    responseCodeDataDef="responseCode"
+	    responsePayloadDataDef="responseBody"
+	    executionLabelExpression="Checking package upload status..."
+	    nextStep="check if upload is complete"
+	    devStep="true"
+    >
+        <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+    </submitHttpStep>
+    
+    <groovyStep name="check if upload is complete"
+	    resultDataDef="uploadStatus"
+    >
+        <transition condition="${uploadStatus.equals('complete')}">
+            <targetStepName>retrieve package content from mediashuttle</targetStepName>
+        </transition>
+	    <!-- Here's where the extra sugar begins @.@ -->
+	    <transition condition="${uploadStatus.equals('failed')}">
+            <targetStepName>move failed package</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>package upload is not complete</targetStepName>
+        </transition>
+        
+        <script>
+	        <![CDATA[
+	        def response = [:]
+	        def status
+	
+	        response = responseBody
+	
+	        response.items.any { item ->
+		        if (item.get('action').asText().equals('Successful Upload'))
+			        status = 'complete'
+		        else if (item.get('action').asText().equals('Upload Failed'))
+			        status = 'failed'
+		        else
+			        status = 'incomplete'
+	        }
+	
+	        return status
+	        ]]>
+        </script>
+    </groovyStep>
+    
+    <executeSubflowStep name="move failed package"
+	    executionLabelExpression="Move failed package ${packageId} to failure directory. | Failed Directory: ${failedPackageDir}"
+	    targetWorkflowId="moveFile"
+	    nextStep="send email"
+    >
+        <subflowContextDataMapping parentDataDef="packagePath"                      subflowDataDef="source" />
+        <subflowContextDataMapping parentDataDef="failedPackageDirectory"           subflowDataDef="destinationPath" />
+    </executeSubflowStep>
+    
+    <executeSubflowStep name="retrieve package content from mediashuttle"
+	    targetWorkflowId="${mediaShuttleSubflowId}"
+	    resultDataDef="packageContentJSON"
+	    executionLabelExpression="Retrieving package content from mediashuttle for package '${packageId}'"
+    >
+        <transition condition="${packageContentJSON != null}">
+            <targetStepName>parse json metadata</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>unable to retrieve package content from mediashuttle</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="packageId" subflowDataDef="packageId"/>
+    </executeSubflowStep>
+    
+    <groovyStep name="parse json metadata"
+	    resultDataDef="jsonMetadata"
+	    devStep="true"
+	    executionLabelExpression="Extracting metadata json from ${jsonData.absolutePath}"
+	    nextStep="set metadata"
+    >
+        <transition condition="${jsonMetadata != null}">
+            <targetStepName>set metadata</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>unable to parse json metadata</targetStepName>
+        </transition>
+        <script>
+	        <![CDATA[
+	        import groovy.json.*;
+	
+	        String fileContents = jsonData.createInputStream().getText()
+	
+	        return new JsonSlurper().parseText(fileContents)
+	        ]]>
+        </script>
+    </groovyStep>
+    
+    <setContextData name="set metadata"
+	    executionLabelExpression="Setting metadata"
+	    devStep="true"
+    >
+	    <transition condition="${jsonData.absolutePath.startsWith('s3')}">
+	        <targetStepName>s3 move json to temp</targetStepName>
+        </transition>
+	    <transition condition="${true}">
+	        <targetStepName>move json to temp</targetStepName>
+        </transition>
+	    
+	    <set targetDataDef="categories" valueExpression="${jsonMetadata?.get('categories')}" />
+        <set targetDataDef="collections" valueExpression="${jsonMetadata?.get('collections')}" />
+        <set targetDataDef="assetMetadata" valueExpression="${jsonMetadata?.get('metadata')}" />
+        <set targetDataDef="linkMetadata" valueExpression="${jsonMetadata?.get('links')}" />
+    </setContextData>
+    
+	<runCommandStep
+		name="s3 move json to temp"
+		executionLabelExpression="Move json data to ${#mapPath(ingestedMetadataPath, 's3mapping')}"
+		executablePathExpression="${awsExePath}"
+		nextStep="s3 move package to ingested"
+	>
+		
+		<arg>s3</arg>
+		<arg>mv</arg>
+		<arg>${ #mapPath(jsonData.absolutePath, 's3mapping') }</arg>
+        <arg>${ #mapPath(ingestedMetadataPath, 's3mapping') }</arg>
+    </runCommandStep>
+    
+	<runCommandStep
+	    name="s3 move package to ingested"
+	    executionLabelExpression="Move package to ${#mapPath(ingestedPackagePath, 's3mapping' )}"
+	    executablePathExpression="${awsExePath}"
+	    nextStep="ingest package"
+    >
+        
+        <arg>s3</arg>
+		<arg>mv</arg>
+		<arg>--recursive</arg>
+		<arg>${ #mapPath(packagePath, 's3mapping') }</arg>
+        <arg>${ #mapPath(ingestedPackagePath, 's3mapping' )}</arg>
+    </runCommandStep>
+	
+    <runCommandStep
+	    name="move json to temp"
+	    executionLabelExpression="Move JSON metadata to ${ingestedMetadataPath}"
+	    executablePathExpression="/bin/mv"
+	    devStep="true"
+	    nextStep="move package to ingested"
+    >
+	    
+        <arg>${jsonData.absolutePath}</arg>
+        <arg>${ingestedMetadataPath + jsonData.name}</arg>
+    </runCommandStep>
+    
+	
+	<runCommandStep
+	    name="move package to ingested"
+	    executionLabelExpression="Move package to ${uploadsPath.replace('upload', 'ingested') + packageId}"
+	    executablePathExpression="/bin/mv"
+	    devStep="true"
+	    nextStep="ingest package"
+    >
+        <arg>${ packagePath }</arg>
+        <arg>${ #mapPath(ingestedPackagePath, 's3mapping' ) }</arg>
+    </runCommandStep>
+    
+    <executeSubflowStep name="ingest package"
+	    executionLabelExpression="Ingesting package"
+	    targetWorkflowId="${ingestSubflowId}"
+    >
+        <transition condition="${jsonData.absolutePath.startsWith('s3')}">
+	        <targetStepName>s3 move json back to package</targetStepName>
+        </transition>
+	    <transition condition="${true}">
+	        <targetStepName>move json back to package</targetStepName>
+        </transition>
+	    
+	    <subflowContextDataMapping parentDataDef="ingestedPackagePath"     subflowDataDef="directoryToIngest"/>
+        <subflowContextDataMapping parentDataDef="assetMetadata"        subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="collections"          subflowDataDef="collections"/>
+        <subflowContextDataMapping parentDataDef="categories"           subflowDataDef="categories"/>
+        <subflowContextDataMapping parentDataDef="linkMetadata"           subflowDataDef="linkMetadata"/>
+        <subflowContextDataMapping parentDataDef="checkForDuplicate"    subflowDataDef="checkForDuplicate"/>
+    </executeSubflowStep>
+
+    
+	<runCommandStep
+		name="s3 move json back to package"
+		executionLabelExpression="Move JSON metadata: ${#mapPath(ingestedMetadataPath, 's3mapping') + jsonData.name} >> ${ingestedPackagePath}"
+		executablePathExpression="${awsExePath}"
+		nextStep="end"
+	>
+		
+		<arg>s3</arg>
+		<arg>mv</arg>
+		<arg>${#mapPath(ingestedMetadataPath, 's3mapping') + jsonData.name}</arg>
+        <arg>${#mapPath(ingestedPackagePath, 's3mapping' )}</arg>
+    </runCommandStep>
+	
+	<runCommandStep
+	    name="move json back to package"
+	    executionLabelExpression="Move JSON metadata: ${#mapPath(ingestedMetadataPath, 's3mapping') + jsonData.name} >> ${ingestedPackagePath}"
+	    executablePathExpression="/bin/mv"
+	    devStep="true"
+	    nextStep="end"
+    >
+        
+        <arg>${ingestedMetadataPath + jsonData.name}</arg>
+        <arg>${ingestedPackagePath}</arg>
+    </runCommandStep>
+	
+	<!-- Notifications -->
+	<emailStep name="send email"
+		executionLabelExpression="Sending Email to ${emailAddresses}"
+		emailAddressesExpression="${emailAddresses}"
+		subjectExpression="Signiant Upload failed: PackageId ${packageId}"
+		nextStep="upload failed"
+	>
+        <body><![CDATA[<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+                    <body>
+                    <table>
+                        <td style="width:600px; font-family: Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size: 14px; text-align: center;">
+                            <div><img
+                                src="https://techstylefashiongroup.com/wp-content/themes/techstyle/images/techstyle-fashion-group.png"
+                                alt="Logo" style="width:150px;"></div>
+                            <hr>
+                            <div style="text-align:left;">
+                                <p>A package failed to upload in signiant. Please notify the team member to reupload the contents attempted to upload for the package id specified below.</p>
+                                <p>The contents in the failed upload have been moved to: <b>${failedPackageDirectory + '/' + packageId}.</b> Please cleanup the failed packages in the failed directory at your earliest convenience.</p>
+                            </div>
+                            <div style="text-align:left;">
+                                <h1>Failed Package:</h1>
+                                <p>ID: ${packageId}</p>
+                            </div>
+                        </td>
+                    </table>
+                    </body>
+                </html>]]></body>
+    </emailStep>
+	<!-- ................................................... End Steps .................................................... -->
+	<noopStep name="package upload is not complete"
+		executionLabelExpression="Upload is not complete | Package ID: ${packageId}"
+	/>
+	
+	<!-- fail -->
+	<failWorkflowStep name="unable to retrieve package content from mediashuttle"
+		reasonExpression="Unable to retrieve package content from MediaShuttle." />
+    
+    <failWorkflowStep name="unable to parse metadata"
+	    reasonExpression="Unable to parse metadata uploaded through Signiant." />
+    
+    <failWorkflowStep name="failed to retrieve portal id"
+	    reasonExpression="Failed to retrieve portal ID from MediaShuttle."
+	    executionLabelExpression="Failed to retrieve portal ID from MediaShuttle"
+    />
+    
+    <failWorkflowStep name="upload failed"
+	    executionLabelExpression="Package failed to upload in signiant. Package ID: ${packageId} | Please resubmit package content for upload."
+	    reasonExpression="Package failed to upload in signiant. Package ID: ${packageId} | Please resubmit package content for upload."
+    />
+	
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- Input -->
+	<contextDataDef name="packageId"                    dataType="String"       required="true" />
+    <contextDataDef name="uploadsPath"                  dataType="String"       required="true" />
+    <contextDataDef name="previouslyIngestedPath"       dataType="String"       required="true" />
+    <contextDataDef name="ingestedDirectory"            dataType="Directory"    defaultDataExpression="${ #mapPathReverse(previouslyIngestedPath, 's3mapping') }" />
+    <contextDataDef name="jsonPath"                     dataType="String"       defaultDataExpression="${packagePath + packageId}_metadata.json" />
+    <contextDataDef name="jsonData"                     dataType="File"         defaultDataExpression="${#fileExists(jsonPath) ? jsonPath : null}" />
+    <contextDataDef name="uploadedFiles"                dataType="File"         multiple="true"     defaultDataExpression="${#walkDir(packageDirectory, null)}" />
+    <contextDataDef name="uploadedFilePaths"            dataType="String"       multiple="true"     defaultDataExpression="${uploadedFiles.![absolutePath.replace('/mnt/', '')]}" />
+    <contextDataDef name="packagePath"                  dataType="String"       defaultDataExpression="${ #mapPathReverse( #joinPath(uploadsPath, packageId), 's3mapping' ) }/" />
+    <contextDataDef name="packageDirectory"             dataType="Directory"    defaultDataExpression="${ #mapPathReverse(packagePath, 's3mapping') }" />
+	
+	<!-- Processing -->
+	<contextDataDef name="packageContentJSON"           dataType="JSON"         multiple="true" />
+    <contextDataDef name="uploadStatus"                 dataType="String"       defaultDataExpression="incomplete" />
+    <contextDataDef name="jsonMetadata"                 dataType="JSON" />
+    <contextDataDef name="assetMetadata"                dataType="JSON" />
+    <contextDataDef name="linkMetadata"                 dataType="JSON"        multiple="true" />
+    <contextDataDef name="categories"                   dataType="Data Object"  multiple="true" />
+    <contextDataDef name="collections"                  dataType="Data Object"  multiple="true" />
+    <contextDataDef name="checkForDuplicate"            dataType="Boolean"      defaultDataExpression="${#sysconfig('workflows.default.sourceIngest.checkForDuplicate') ?: 'false'}" />
+    <contextDataDef name="mediaShuttleSubflowId"        dataType="String"       defaultDataExpression="getMediaShuttlePackageContent" />
+    <contextDataDef name="ingestSubflowId"              dataType="String"       defaultDataExpression="_anyDirectoryIngest" />
+    <contextDataDef name="ingestedMetadataPath"         dataType="String"       defaultDataExpression="${ #mapPathReverse( #joinPath(previouslyIngestedPath.replace('signiant', 'signiantIngested'), 'metadata'), 's3mapping') }/" />
+	<contextDataDef name="ingestedPackagePath"          dataType="String"       defaultDataExpression="${ #mapPathReverse(#joinPath(uploadsPath.replace('signiant', 'signiantIngested'), packageId), 's3mapping') }/" />
+    <contextDataDef name="groovyResult"                 dataType="Boolean"      hidden="true" />
+    <contextDataDef name="portalId"                     dataType="String" />
+	<contextDataDef name="tempJsonFile"                 dataType="File" />
+	
+	<!-- Signiant Info -->
+	<!--API responses and codes-->
+	<contextDataDef name="responseCode"                 dataType="String"/>
+    <contextDataDef name="responseBody"                 dataType="JSON"/>
+	
+	
+	<!-- defaults -->
+	<contextDataDef name="mediaShuttleApiKey"           dataType="String"       hidden="true"   defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl"   dataType="String"       defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+    <contextDataDef name="failedPackageDirectory"       dataType="String"       defaultDataExpression="${repoPath + '/' + #sysconfig('media.shuttle.failed.path')}" />
+    <contextDataDef name="emailAddresses"               dataType="String"       multiple="true"    defaultDataExpression="${#sysconfig('media.shuttle.audit.email') ?: #this.startedBy.emailAddress}" />
+	
+	
+	<!--test defs-->
+	<contextDataDef name="repoPath"                     dataType="String" />
+    <contextDataDef name="uploadsAddress"               dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.import.path')}/" />
+    <contextDataDef name="ingestedAddress"              dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.ingested.path')}" />
+	
+	<!-- Configs -->
+	<contextDataDef name="awsExePath"                   dataType="String"           defaultDataExpression="${ #sysconfig('workflows.awsExePath') ?: '/usr/bin/aws' }" />
+</workflow>

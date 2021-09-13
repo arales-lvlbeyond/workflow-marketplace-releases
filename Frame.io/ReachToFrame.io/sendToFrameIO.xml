@@ -1,0 +1,342 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="sendToFrameIO"
+    name="Send Asset to Frame.io"
+    executionLabelExpression="Sending ${subject.name} to Frame.io"
+    description=""
+    showInUserInterface="true"
+    group="Frame.io"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression=""
+    sdkVersion="">
+
+
+    <initialStepName>Check Project Collection</initialStepName>
+
+    <!--    Check if asset is in project collection     -->
+    <noopStep name="Check Project Collection"
+        executionLabelExpression="Asset Collection? ${assetCollections?.size()}"
+    >
+        <transition condition="${assetCollections.size() == 1}">
+            <targetStepName>Set collection</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Construct RootAssetID</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <setContextData name="Set collection"
+        devStep="true"
+        targetDataDef="collection"
+        valueExpression="${assetCollections}"
+        nextStep="Set root asset id"
+    />
+    
+    <setContextData name="Set root asset id"
+        targetDataDef="rootAssetId"
+        valueExpression="${collection.metadata.frameIOParentID}"
+    >
+        <transition condition="${rootAssetId == null}">
+            <targetStepName>Construct RootAssetID</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Check Parent ID</targetStepName>
+        </transition>
+    </setContextData>
+
+    
+    <!--    Send to Frame.io    -->
+    <groovyStep name="Construct RootAssetID"
+                devStep="true"
+                resultDataDef="rootAssetId"
+                nextStep="Check Parent ID">
+        <script>
+            <![CDATA[
+                StringBuilder sb = new StringBuilder(project);
+                sb.insert(20, '-');
+                sb.insert(16, '-');
+                sb.insert(12, '-');
+                sb.insert(8, '-');
+                return sb.toString()
+			]]>
+        </script>
+    </groovyStep>
+
+    <noopStep name="Check Parent ID"
+              devStep="true">
+        <transition condition="${assetMaster.metadata.frameIOParentID == null OR
+                                assetMaster.metadata.frameIOParentID.isEmpty() OR
+                                assetMaster.metadata.frameIOParentID.equals(rootAssetId)}">
+            <targetStepName>Check Input</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Parent ID Mismatch</targetStepName>
+        </transition>
+    </noopStep>
+
+    <noopStep name="Check Input"
+              executionLabelExpression="Request ${format} of ${assetMaster.name}">
+        <transition condition="${format == 'source' and assetMaster.getSourceContent() != null and assetMaster.getSourceContent().file != null}">
+            <targetStepName>Set Target File to Source</targetStepName>
+        </transition>
+        <transition condition="${format == 'mezzanine' and assetMaster.getMezzanineContent() != null and assetMaster.getMezzanineContent().file != null}">
+            <targetStepName>Set Target File to Mezzanine</targetStepName>
+        </transition>
+        <transition condition="${format == 'proxy' and assetMaster.getProxyContent() != null and assetMaster.getProxyContent().file != null}">
+            <targetStepName>Set Target File to Proxy</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Notify Requested Content is Not Present</targetStepName>
+        </transition>
+    </noopStep>
+
+    <setContextData name="Set Target File to Source"
+                    targetDataDef="targetFile"
+                    valueExpression="${assetMaster.getSourceContent().file}">
+        <set targetDataDef="mimeType" valueExpression="${assetMaster.getSourceContent().mimeType}"/>
+        <transition condition="${targetFile.absolutePath.startsWith('s3:')
+                                OR targetFile.absolutePath.startsWith('googlecloud:')
+                                OR targetFile.absolutePath.startsWith('azure:')}">
+            <targetStepName>Send Cloud File to Frame.io</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Send On-Prem File to Frame.io</targetStepName>
+        </transition>
+    </setContextData>
+
+    <setContextData name="Set Target File to Mezzanine"
+                    targetDataDef="targetFile"
+                    valueExpression="${assetMaster.mezzanine.file}">
+        <set targetDataDef="mimeType" valueExpression="${assetMaster.mezzanine.mimeType}"/>
+        <transition condition="${targetFile.absolutePath.startsWith('s3:')
+                                OR targetFile.absolutePath.startsWith('googlecloud:')
+                                OR targetFile.absolutePath.startsWith('azure:')}">
+            <targetStepName>Send Cloud File to Frame.io</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Send On-Prem File to Frame.io</targetStepName>
+        </transition>
+    </setContextData>
+
+    <setContextData name="Set Target File to Proxy"
+                    targetDataDef="targetFile"
+                    valueExpression="${assetMaster.getProxyContent().file}">
+        <set targetDataDef="mimeType" valueExpression="${assetMaster.getProxyContent().mimeType}"/>
+        <transition condition="${targetFile.absolutePath.startsWith('s3:')
+                                OR targetFile.absolutePath.startsWith('googlecloud:')
+                                OR targetFile.absolutePath.startsWith('azure:')}">
+            <targetStepName>Send Cloud File to Frame.io</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Send On-Prem File to Frame.io</targetStepName>
+        </transition>
+    </setContextData>
+
+    <executeSubflowStep name="Send Cloud File to Frame.io"
+                        targetWorkflowId="sendCloudFileToFrameIO"
+                        subjectChangePath="${targetFile}"
+                        subflowTargetDataDef="targetFile"
+                        resultDataDef="frameId">
+        <subflowContextDataMapping parentDataDef="rootAssetId" subflowDataDef="rootAssetId"/>
+        <subflowContextDataMapping parentDataDef="mimeType" subflowDataDef="mimeType"/>
+
+        <transition condition="${existingFrameID != null AND !existingFrameID.isEmpty()}">
+            <targetStepName>Set version JSON body</targetStepName>
+        </transition>
+        <transition condition="${frameId != null}">
+            <targetStepName>Set frameioUrl Field</targetStepName>
+        </transition>
+    </executeSubflowStep>
+
+    <executeSubflowStep name="Send On-Prem File to Frame.io"
+                        targetWorkflowId="uploadOnPremFileToFrameIO"
+                        subjectChangePath="${targetFile}"
+                        subflowTargetDataDef="targetFile"
+                        resultDataDef="frameId">
+        <subflowContextDataMapping parentDataDef="rootAssetId" subflowDataDef="rootAssetId"/>
+        <subflowContextDataMapping parentDataDef="mimeType" subflowDataDef="mimeType"/>
+
+        <transition condition="${existingFrameID != null AND !existingFrameID.isEmpty()}">
+            <targetStepName>Set version JSON body</targetStepName>
+        </transition>
+        <transition condition="${frameId != null}">
+            <targetStepName>Set frameioUrl Field</targetStepName>
+        </transition>
+    </executeSubflowStep>
+
+    <setContextData name="Set version JSON body"
+                    devStep="true"
+                    nextStep="get Frame UUID For Versioning">
+        <set targetDataDef="frameioVersionRequestBody">
+            <![CDATA[
+                    {
+                        "next_asset_id": "${frameId}"
+                    }
+                ]]>
+        </set>
+    </setContextData>
+
+    <executeSubflowStep name="get Frame UUID For Versioning"
+                        targetWorkflowId="getFrameUUIDForVersioning"
+                        subjectChangePath="${existingFrameID}"
+                        subflowTargetDataDef="frameId"
+                        resultDataDef="uuidForVersioning"
+                        nextStep="version asset">
+    </executeSubflowStep>
+
+    <submitHttpStep name="version asset"
+                    urlExpression="${frameioURL}${uuidForVersioning}/version"
+                    requestMethodExpression="POST"
+                    responseCodeDataDef="frameioVersionResponseCode"
+                    responsePayloadDataDef="frameioVersionResponseString"
+                    nextStep="Set frameioUrl Field">
+        <requestPayloadItem name="body">${frameioVersionRequestBody.toString()}</requestPayloadItem>
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <setAssociationMetadataStep name="Set frameioUrl Field"
+                                targetExpression="${assetMaster}"
+                                propertyNameExpression="frameioURL"
+                                valueExpression="{&quot;title&quot;: &quot;https://app.frame.io/player/${frameId}&quot;, &quot;url&quot;: &quot;https://app.frame.io/player/${frameId}&quot;}"
+                                nextStep="set reachengine url field"
+    />
+    
+    <runCommandStep name="set reachengine url field"
+        executionLabelExpression="Set asset URL in Frame.io"
+        executablePathExpression="/usr/bin/curl"
+        stdoutDataDef="frameioAssetResponseJson"
+        resultCodeDataDef="frameioAssetResponseCode"
+                                nextStep="Save frameioStatus"
+    >
+        <arg>--request</arg>
+        <arg>PUT</arg>
+        <arg>--url</arg>
+        <arg>${frameioURL}${frameId}/</arg>
+        <arg>--header</arg>
+        <arg>Authorization: Bearer ${frameBearer}</arg>
+        <arg>--header</arg>
+        <arg>Content-Type: application/json</arg>
+        <arg>--data</arg>
+        <arg>${frameioAssetRequestBody.toString()}</arg>
+    </runCommandStep>
+    
+
+    <nimbus:setMetadataValueStep name="Save frameioStatus"
+                                 targetExpression="${assetMaster}"
+                                 propertyNameExpression="${frameioStatusFieldName}"
+                                 valueExpression="${#picklistValue(frameioStatusFieldName, 'In Review')}"
+                                 nextStep="Save deliveredToFrameio"/>
+
+    <nimbus:setMetadataValueStep name="Save deliveredToFrameio"
+                                 targetExpression="${assetMaster}"
+                                 propertyNameExpression="${deliveredToFrameioFieldName}"
+                                 valueExpression="${#picklistValue(deliveredToFrameioFieldName,'True')}"
+                                 nextStep="Save frameIOParentID"/>
+
+    <nimbus:setMetadataValueStep name="Save frameIOParentID"
+                                 targetExpression="${assetMaster}"
+                                 propertyNameExpression="frameIOParentID"
+                                 valueExpression="${rootAssetId}"
+                                 nextStep="Save frameio ID"/>
+
+    <nimbus:setMetadataValueStep name="Save frameio ID"
+                                 targetExpression="${assetMaster}"
+                                 propertyNameExpression="frameioID"
+                                 valueExpression="${frameId}"
+                                 nextStep="end"/>
+
+    <createFailureNotificationStep name="Notify Requested Content is Not Present"
+                                   notificationTypeExpression="error"
+                                   notificationBodyExpression="Requested file: ${format} of ${assetMaster.name} does not exist! Please contact an adminstrator for assistance."
+                                   nextStep="Fail Requested File is Not Present"/>
+
+    <failWorkflowStep name="Fail Requested File is Not Present" reasonExpression="Requested file: ${format} of ${assetMaster.name} does not exist!"/>
+
+    <failWorkflowStep name="Parent ID Mismatch"
+                      executionLabelExpression="This asset is already associated with a different team than was specified.
+                      If you would like to reassociate this asset with a new team please clear the metadata values for Frame IO Parent ID and FrameioID.
+                      Warning: this will sever the connection to the previous Frame.io ID."
+                      reasonExpression="This asset is already associated with a different team than was specified.
+                      If you would like to reassociate this asset with a new team please clear the metadata values for Frame IO Parent ID and FrameioID.
+                      Warning: this will sever the connection to the previous Frame.io ID."/>
+    <!-- End Steps -->
+    <noopStep name="end"/>
+
+    <createFailureNotificationStep name="Collection mapping error" notificationTypeExpression="error" notificationBodyExpression="Collection mapping error - Please correct the collection association" />
+    
+
+    <!-- CONTEXT DATA   -->
+    <!-- Input -->
+    <contextDataDef name="project" label="Frame.io Project Inbox" dataType="String" userInput="true" required="true" displayIndex="1">
+        <picklist>
+            <metadataProperty>frameioProject</metadataProperty>
+        </picklist>
+    </contextDataDef>
+    <contextDataDef name="format" dataType="String" userInput="true" required="false" defaultDataExpression="proxy" displayIndex="2">
+        <picklist>
+            <picklistItem value="source" label="Source"/>
+            <picklistItem value="mezzanine" label="Mezzanine"/>
+            <picklistItem value="proxy" label="Proxy"/>
+        </picklist>
+    </contextDataDef>
+
+    <!-- Internal -->
+    <contextDataDef name="assetMaster"              dataType="Data Object" defaultDataExpression="${subject}"/>
+    <contextDataDef name="existingFrameID"          dataType="String" defaultDataExpression="${assetMaster.metadata.frameioID}"/>
+    <contextDataDef name="frameioURL"               dataType="String"       defaultDataExpression="https://api.frame.io/v2/assets/"/>
+    <contextDataDef name="frameBearer"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"   hidden="true"/>
+    <contextDataDef name="signedUrl"                dataType="String"/>
+    <contextDataDef name="targetFile"               dataType="File"/>
+    <contextDataDef name="mimeType"                 dataType="String"/>
+    <contextDataDef name="rootAssetId"              dataType="String"/>
+    <contextDataDef name="frameioVersionRequestBody"       dataType="JSON"/>
+    <contextDataDef name="uuidForVersioning"        dataType="String"/>
+    <contextDataDef name="frameioVersionResponseString" dataType="String"/>
+    <contextDataDef name="frameioVersionResponseCode" dataType="Integer"/>
+
+    <contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reachengine.url')}"/>
+    <contextDataDef name="mediaType" dataType="String" defaultDataExpression="${#mediaType(assetMaster).toLowerCase()}"/>
+    <contextDataDef name="frameioAssetResponseJson" dataType="JSON"/>
+    <contextDataDef name="frameioAssetResponseCode" dataType="Integer"/>
+    <contextDataDef name="frameioAssetRequestBody" dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    "description" : "${reachUrl}/#/assets/${mediaType}/${assetMaster.id}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+    
+    <contextDataDef name="projectRootAssetId" dataType="String"/>
+    <contextDataDef name="assetCollections"         dataType="Data Object"  multiple="true" defaultDataExpression="${assetMaster.collectionMemberships.![collection]}"/>
+    <contextDataDef name="collection" dataType="Data Object"/>
+    
+    <!--  Metadata Field names  -->
+    <contextDataDef name="frameioStatusFieldName"   dataType="String"       defaultDataExpression="${#sysconfig('workflow.field.names.frameioStatus') ?: 'frameioStatus'}"/>
+    <contextDataDef name="deliveredToFrameioFieldName"   dataType="String"       defaultDataExpression="${#sysconfig('workflow.field.names.deliveredToFrameio') ?: 'deliveredToFrameio'}"/>
+
+    <contextDataDef name="frameId"                  dataType="String"/>
+    
+</workflow>

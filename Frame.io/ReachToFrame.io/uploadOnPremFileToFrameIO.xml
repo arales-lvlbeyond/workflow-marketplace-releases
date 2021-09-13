@@ -1,0 +1,56 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="uploadOnPremFileToFrameIO"
+          name="Send On-Prem File to Frame.IO"
+          executionLabelExpression="Uploading ${targetFile.name} to Frame.io"
+          resultDataDef="frameId"
+          description=""
+          showInUserInterface="false"
+          group="Frame.io"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion="">
+
+    <initialStepName>upload to frame.io</initialStepName>
+
+    <runCommandStep name="upload to frame.io"
+                    executablePathExpression="${pathToPy}"
+                    executionLabelExpression="upload ${targetFile.name} to Frame.io"
+                    continueOnException="false"
+                    stdoutDataDef="frameId"
+                    stderrDataDef="responseErrString"
+                    nextStep="end"
+    >
+        <arg>${pathToUploadPy}</arg>
+        <arg>--client-token</arg>
+        <arg>${frameBearer}</arg>
+        <arg>--parent-id</arg>
+        <arg>${rootAssetId}</arg>
+        <arg>--asset-name</arg>
+        <arg>${targetFile.name}</arg>
+        <arg>--file-path</arg>
+        <arg>${targetFile.absolutePath}</arg>
+        <arg>--mime-type</arg>
+        <arg>${mimeType}</arg>
+    </runCommandStep>
+
+    <noopStep name="end"/>
+
+    <!--    CONTEXT DATA   -->
+    <!--  Input  -->
+    <contextDataDef name="targetFile"               dataType="File"/>
+    <contextDataDef name="rootAssetId"              dataType="String"/>
+    <contextDataDef name="mimeType"                 dataType="String"/>
+
+    <contextDataDef name="responseOutString"        dataType="String"/>
+    <contextDataDef name="responseErrString"        dataType="String"/>
+    <contextDataDef name="frameBearer"              dataType="String"   hidden="true"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"/>
+    <contextDataDef name="pathToUploadPy"                 dataType="String"   defaultDataExpression="${#sysconfig('scripts.python.frameio.upload.path')}"/>
+    <contextDataDef name="pathToPy"                 dataType="String"   defaultDataExpression="${#sysconfig('scripts.python.path') ?: '/usr/local/bin/python2.7'}"/>
+
+    <!--  Result  -->
+    <contextDataDef name="frameId"                  dataType="String"/>
+
+</workflow>

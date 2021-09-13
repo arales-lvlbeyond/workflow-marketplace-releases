@@ -1,0 +1,260 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="sendVideoToFTPsite"
+	name="Send Video to FTP Site"
+	executionLabelExpression="Sending Video to ${siteName} | ${subject.name}"
+	description=""
+	subjectDOClassName="VideoAssetMaster"
+	showInUserInterface="true"
+	resultDataDef="deliveryStatus"
+	deadlineExpression=""
+	sdkVersion="2.3.6"
+>
+	
+	<initialStepName>check if workflow is already running for this asset</initialStepName>
+	
+	<queryStep name="check if workflow is already running for this asset"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Workflow running already? ${currentExecutions.size() != 0}"
+		pctComplete="1"
+	>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>check for archived content</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>workflow already running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${#this.workflow.workflowVersion.workflow.key}" />
+                        </condition>
+                        <condition property="subject" op="eq">
+                            <test value="${#this.subject}" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${#this.workflow.uuid}" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	
+	<noopStep name="check for archived content"
+		executionLabelExpression="Checking for archived content"
+	>
+		<transition condition="${contentArchived}">
+			<targetStepName>set content archived</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>sanitize file name</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<setContextData name="set content archived"
+		executionLabelExpression="Content Archived | ${contentArchived}"
+		targetDataDef="deliveryMessage"
+		valueExpression="Content is archived. Cannot Deliver. Please restore content and try again."
+		nextStep="send user email"
+	/>
+	
+	<setContextData name="workflow already running"
+		executionLabelExpression="Workflow Already Running | ${currentExecutions.size() != 0}"
+		targetDataDef="deliveryMessage"
+		valueExpression="Workflow already running. Please wait for existing job to complete and retry if needed."
+		nextStep="send user email"
+	/>
+	
+	<groovyStep name="sanitize file name"
+		resultDataDef="cleanedFilename"
+		executionLabelExpression="Cleaning filename for publication to web"
+		nextStep="convert video for website"
+	>
+		<script>
+            <![CDATA[
+			def fileNameNoSpaces = userInputFileName.replaceAll(" ", "_")
+			return fileNameNoSpaces.replaceAll("[^0-9a-zA-Z_]+", "")
+			]]>
+        </script>
+	</groovyStep>
+	
+	<convertVideoStep name="convert video for website"
+		resultDataDef="transcodeResultFile"
+		executionLabelExpression="Transcoding video to publish to ${siteName}"
+		sourceFileExpression="${sourceFile}"
+		mediaConversionTemplateExpression="${targetTemplateName}"
+		pctComplete="50"
+		nextStep="set delivery file name"
+	>
+		<exception-transition type="WorkflowException">
+			<targetStepName>set delivery failure</targetStepName>
+		</exception-transition>
+		<transition condition="${true}">
+			<targetStepName>set delivery file name</targetStepName>
+		</transition>
+		<conversionParam name="UUID">${vantageUuid}</conversionParam>
+	</convertVideoStep>
+	
+	<setContextData name="set delivery file name"
+		executionLabelExpression="Setting Delivery Filename to ${deliveryFilename}"
+		targetDataDef="deliveryFilename"
+		valueExpression="${cleanedFilename}.${#extension(transcodeResultFile)}"
+		nextStep="copy to ftp"
+	/>
+	
+	<nimbus:ftpFileStep name="copy to ftp"
+		executionLabelExpression="Sending file ${deliveryFilename} to ${siteName}"
+		sourceFileExpression="${transcodeResultFile}"
+		ftpServerExpression="${ftpServer}"
+		ftpPortExpression="21"
+		ftpUserExpression="${ftpUser}"
+		ftpPasswordExpression="${ftpPassword}"
+		ftpFolderExpression="${ftpDir}"
+		targetFileExpression="${deliveryFilename}"
+		pctComplete="80"
+	>
+		<exception-transition type="WorkflowException">
+			<targetStepName>set delivery failure</targetStepName>
+		</exception-transition>
+		<transition condition="${true}">
+			<targetStepName>set delivery success</targetStepName>
+		</transition>
+	</nimbus:ftpFileStep>
+	
+	<setContextData name="set delivery success"
+		executionLabelExpression="Setting success data for delivery"
+		devStep="true"
+		nextStep="delete transcode artifact"
+	>
+		<set targetDataDef="deliveryStatus"     valueExpression="Success"/>
+		<set targetDataDef="deliveryTime"       valueExpression="${#newDate}"/>
+		<set targetDataDef="deliveryMessage"    valueExpression="Delivery Complete"/>
+	</setContextData>
+	
+	<setContextData name="set delivery failure"
+		executionLabelExpression="Setting values for failure"
+	>
+		<transition condition="${#fileExists(transcodeResultFile)}">
+			<targetStepName>delete transcode artifact</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>send user email</targetStepName>
+		</transition>
+		<set targetDataDef="deliveryMessage"    valueExpression="Delivery Error. Please try again or contact support if repeated failures."/>
+	</setContextData>
+	
+	<deleteFileStep name="delete transcode artifact"
+		executionLabelExpression="Deleting transcode Artifact file"
+		sourceFilesExpression="${transcodeResultFile}"
+		pctComplete="90"
+		nextStep="send user email"
+	/>
+	
+	<emailStep name="send user email"
+		emailAddressesExpression="${userEmail}"
+		subjectExpression="Send Video to FTP site | ${deliveryStatus}"
+		pctComplete="95"
+	>
+		<exception-transition type="org.springframework.mail.MailSendException">
+			<targetStepName>set mail send failure</targetStepName>
+		</exception-transition>
+		<transition condition="${true}">
+			<targetStepName>save metadata to asset</targetStepName>
+		</transition>
+		<body>
+			<![CDATA[
+            Hello ${userEmail},
+
+            This is to confirm a content delivery to ${siteName} website.
+            --- Asset Info ---
+            Asset Name:     ${subject.name}
+            Asset ID:       ${subject.id}
+            Description:    ${subject.metadata.description}
+            --- Job Info ---
+            Started By:     ${userName}
+            Status:         ${deliveryStatus}
+            Filename:       ${deliveryFilename}
+            FTP Server:     ${ftpServer}
+            Date/Time:      ${deliveryTime}
+            Message:        ${deliveryMessage}
+
+            From Your friendly content management robot,
+            Reach Engine
+
+            ]]>
+		</body>
+	</emailStep>
+	
+	<setContextData name="set mail send failure"
+		executionLabelExpression="Setting values for failure"
+		nextStep="save metadata to asset"
+	>
+		<set targetDataDef="deliveryMessage"    valueExpression="E-mail Delivery Error. Please check UI for job completion status."/>
+		<set targetDataDef="deliveryStatus"     valueExpression="Failure"/>
+	</setContextData>
+	
+	<saveDataObjectStep name="save metadata to asset"
+		targetDataObjectClass="${subject.metadata}"
+	>
+		<transition condition="${deliveryStatus.toLowerCase() == 'failure'}">
+			<targetStepName>fail workflow</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<property name="publishStatus">${deliveryStatus.toLowerCase() == 'success' ? 'published' : 'publishError'}</property>
+	</saveDataObjectStep>
+	
+	<failWorkflowStep name="fail workflow"
+		reasonExpression="${deliveryMessage}"
+		executionLabelExpression="Workflow ${deliveryStatus} | ${deliveryMessage}"
+	/>
+	
+	<noopStep name="end"/>
+	
+	
+	<!-- Asset/File Data Defs -->
+	<contextDataDef name="contentArchived"      dataType="Boolean"      defaultDataExpression="${subject.mezzanine.truncatedFlag AND subject.status == 'ARCHIVED'}"/>
+	<contextDataDef name="currentExecutions"    dataType="Data Object"  multiple="true"/>
+	<contextDataDef name="sourceFile"           dataType="File"        defaultDataExpression="${subject.mezzanine.file}"/>
+	<contextDataDef name="siteName"             dataType="String"       userInput="true"    />
+	<!-- FTP Info -->
+	<contextDataDef name="ftpDir"               dataType="String"       defaultDataExpression="/"/>
+	<contextDataDef name="ftpServer"            dataType="String"       defaultDataExpression="${#sysconfig('delivery.destination.ftpSite.ftp.host')}"/>
+	<contextDataDef name="ftpUser"              dataType="String"       defaultDataExpression="${#sysconfig('delivery.destination.ftpSite.ftp.user')}" hidden="true"/>
+	<contextDataDef name="ftpPassword"          dataType="String"       defaultDataExpression="${#sysconfig('delivery.destination.ftpSite.ftp.password')}" hidden="true"/>
+	
+	<!-- Vantage Info -->
+	<contextDataDef name="vantageUuid"          dataType="String"       defaultDataExpression="${#uuid().toString()}"/>
+	<contextDataDef name="transcodeResultFile"  dataType="File"         />
+	<contextDataDef name="targetTemplateName"   dataType="String"       defaultDataExpression="Deliver to FTP site"/>
+	
+	<!--Processing Data Defs -->
+	<contextDataDef name="userInputFileName"    dataType="String"       userInput="true" required="true" label="Delivery Filename (no extension):"/>
+	<contextDataDef name="cleanedFilename"      dataType="String"       />
+	<contextDataDef name="deliveryFilename"     dataType="String"       />
+	<contextDataDef name="deliveryTime"         dataType="Date/Time"    />
+	<contextDataDef name="deliveryStatus"       dataType="String"       defaultDataExpression="Failure"/>
+	<contextDataDef name="deliveryMessage"      dataType="String"       />
+	<contextDataDef name="publishStatusEntry"   dataType="String"       defaultDataExpression="publishError"/>
+	
+	<!-- User Info -->
+	<contextDataDef name="userEmail"            dataType="Email"    defaultDataExpression="${#sysconfig('notifications.emailAddress.contentDelivery')}"/>
+	<contextDataDef name="userFirstName"        dataType="String"   defaultDataExpression="${#this.startedBy.firstName}"/>
+	<contextDataDef name="userName"             dataType="String"   defaultDataExpression="${#this.startedBy.userName}"/>
+</workflow>

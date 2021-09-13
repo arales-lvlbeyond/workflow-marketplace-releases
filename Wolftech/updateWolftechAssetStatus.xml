@@ -1,0 +1,106 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="updateWolftechAssetStatus"
+	name="Update Wolftech Asset Status"
+	description=""
+	executionLabelExpression="Update Wolftech Asset Status: ${subject.name}"
+	subjectDOClassName="AssetMaster"
+	deadlineExpression=""
+	showInUserInterface="true"
+	sdkVersion=""
+	>
+	
+	<initialStepName>generate wolftech token</initialStepName>
+	
+	
+	<executeSubflowStep
+		name="generate wolftech token"
+		targetWorkflowId="wolftechAuthentication"
+		resultDataDef="bearerToken"
+		nextStep="set json body"
+		/>
+	
+	<setContextData
+		name="set json body"
+		devStep="true"
+		nextStep="update wolftech asset status"
+	>
+		<set targetDataDef="wolftechPayloadBody">
+			<![CDATA[
+{
+	"Command":"SendMamStatus",
+	"Payload":"${payloadStringFirst+payloadStringSecond+payloadStringThird}"
+}
+            ]]>
+		</set>
+	</setContextData>
+	
+	<submitHttpStep
+		name="update wolftech asset status"
+		urlExpression="${workflowAPIURL}"
+		requestMethodExpression="POST"
+		responseCodeDataDef="wolftechResponseCode"
+		responsePayloadDataDef="wolftechResponseJSON"
+		continueOnException="false"
+		>
+		<transition condition="${wolftechResponseCode != 200}">
+			<targetStepName>status update failed</targetStepName>
+		</transition>
+		<transition condition="${wolftechResponseJSON.success == true}">
+			<targetStepName>update asset status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>status update failed</targetStepName>
+		</transition>
+		<requestPayloadItem name="body">${wolftechPayloadBody.toString()}</requestPayloadItem>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="Authorization">Bearer ${bearerToken}</requestHeader>
+	</submitHttpStep>
+	
+	<saveDataObjectStep
+		name="update asset status"
+		executionLabelExpression="Updating status of asset in Reach Engine to Ready."
+		dataObjectExpression="${subject.metadata}"
+		nextStep="end"
+		>
+		<property name="wolftechStatus">${#picklistValue('wolftechStatus', "Ready")}</property>
+	</saveDataObjectStep>
+	
+	<failWorkflowStep name="status update failed" reasonExpression="status update failed, see Wolftech response" executionLabelExpression="Status update failed, please see response context data."/>
+	
+	<noopStep name="end"/>
+	
+	<!-- Processing Data Defs -->
+	<contextDataDef name="bearerToken"              dataType="String"/>
+	
+	<contextDataDef name="wolftechPayloadBody"      dataType="JSON"/>
+	<contextDataDef name="wolftechResponseCode"     dataType="Integer"/>
+	<contextDataDef name="wolftechResponseJSON"     dataType="JSON"/>
+	
+	<contextDataDef name="workflowAPIURL"           dataType="String"       defaultDataExpression="${#sysconfig('workflow.wolftech.workflowAPIURL')}"/>
+	
+	<contextDataDef name="payloadStringFirst"       dataType="String"       defaultDataExpression="{\&quot;id\&quot;:\&quot;"/>
+	<contextDataDef name="payloadStringSecond"      dataType="String"       defaultDataExpression="${subject.metadata.wolftechID}"/>
+	<contextDataDef name="payloadStringThird"       dataType="String"       defaultDataExpression="\&quot;,\&quot;status\&quot;:\&quot;READY\&quot;}"/>
+	
+	
+</workflow>

@@ -1,0 +1,59 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="approveAsset"
+    name="Approve Asset"
+    executionLabelExpression="Approve Asset | Approving the asset ${asset.name}"
+    description="This Workflow can be initiated by managers in order for an asset to be approved for publish"
+    showInUserInterface="true"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${metadata.lifecycleState == #picklistValue('lifecycleState', 'Under Review')}"
+    sdkVersion=""
+    >
+
+    <initialStepName>workflow started notification</initialStepName>
+
+    <createSuccessNotificationStep
+        name="workflow started notification"
+        notificationTypeExpression="success"
+        notificationBodyExpression="Approving Asset workflow has started"
+        nextStep="set state to approved for publish"
+        />
+
+    <saveDataObjectStep
+        name="set state to approved for publish"
+        executionLabelExpression="Setting state on asset to 'Approved for Publish'"
+        dataObjectExpression="${asset.metadata}"
+        nextStep="send approved email"
+        >
+        <property name="lifecycleState">${#picklistValue('lifecycleState', 'Approved for Publish')}</property>
+    </saveDataObjectStep>
+
+    <emailStep
+        name="send approved email"
+        emailAddressesExpression="${distributionEmail},${requesterEmail}"
+        subjectExpression="The asset ${asset.name} has been rejected"
+        nextStep="end"
+        >
+        <body>
+            The asset ${asset.name} has been approved!
+            Reason: ${approvalReason}
+            ID: ${asset.id}
+            URL: ${reachUrl}/#/assets?focusedAssetId=${asset.id}&amp;focusedAssetType=${assetType}
+        </body>
+    </emailStep>
+    
+    <noopStep name="end"/>
+
+    <!-- Input -->
+    <contextDataDef name="asset" dataType="Data Object" defaultDataExpression="${subject}"/>
+    <contextDataDef name="approvalReason" dataType="String" userInput="true" defaultDataExpression="Approved"/>
+
+    <!-- Internal -->
+    <contextDataDef name="requesterEmail" dataType="String" defaultDataExpression="${asset.metadata.reviewRequesterEmail}"/>
+    <contextDataDef name="distributionEmail" dataType="String" defaultDataExpression="${#sysconfig('workflow.review.email')}"/>
+    <contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reach.engine.url')}"/>
+    <contextDataDef name="assetType" dataType="String" defaultDataExpression="${asset.assetType.toLowerCase()}"/>
+    
+</workflow>

@@ -1,0 +1,57 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="showFilePath"
+	name="Display Asset Content Filepaths"
+	executionLabelExpression="Display Filepaths | Asset: ${subject.name}"
+	subjectDOClassName="AssetMaster"
+	deadlineExpression=""
+	showInUserInterface="true"
+	sdkVersion=""
+>
+	
+	<initialStepName>show mezz filepath</initialStepName>
+
+	<noopStep
+		name="show mezz filepath"
+		executionLabelExpression="Mezz Filepath: ${mezzFile}"
+		nextStep="show source filepath"
+		/>
+	
+	<noopStep
+		name="show source filepath"
+		executionLabelExpression="Source Filepath: ${sourceFile}"
+		nextStep="show proxy filepath"
+		/>
+	
+	<noopStep
+		name="show proxy filepath"
+		executionLabelExpression="Proxy Filepath: ${proxyFile}"
+		nextStep="end"
+		/>
+	
+	<noopStep name="end"/>
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<contextDataDef name="sourceFile"           dataType="String"       defaultDataExpression="${subject.sourceContent.file.absolutePath}"/>
+	<contextDataDef name="mezzFile"             dataType="String"       defaultDataExpression="${subject.mezzanineContent.file.absolutePath}"/>
+	<contextDataDef name="proxyFile"            dataType="String"       defaultDataExpression="${subject.proxy.file.absolutePath}"/>
+	
+</workflow>

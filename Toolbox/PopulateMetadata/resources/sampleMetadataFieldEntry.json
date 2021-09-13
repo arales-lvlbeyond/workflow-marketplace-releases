@@ -1,0 +1,70 @@
+{
+  "sampleMetadataFiled": {
+      "name": "sample_name",
+      "Label": "sample_label",
+      // defaults to camel case of field name
+      "type": "sample_type",
+      // string, text, double, lookup (multiple == true / false), date, boolean, link
+      "showInInspector": true
+  },
+  "sampleAPIFieldInputs" : {
+    "text-small" : {
+      "name": "sampleSmallText",
+      "displayName": "sampleSmallText",
+      "type": "string",
+      "description": "test field",
+      "showInInspector": true
+    },
+    "text-large" : {
+      "name": "sampleLargeText",
+      "displayName": "sampleLargeText",
+      "type": "text",
+      "description": "test field",
+      "showInInspector": true
+    },
+    "checkbox" : {
+      "name": "sampleCheckbox",
+      "displayName": "sampleCheckbox",
+      "type": "boolean",
+      "description": "test field",
+      "showInInspector": true
+    },
+    "picklist (multiple)" :  {
+      "name": "sampleSinglePicklist",
+      "displayName": "testAPIPicklistBlank",
+      "type": "lookup",
+      "multiple" : false,
+      "description": "test field",
+      "showInInspector": true
+    },
+    "picklist (multiple)" :  {
+      "name": "sampleMultiplePicklist",
+      "displayName": "sampleMultiplePicklist",
+      "type": "lookup",
+      "multiple" : true,
+      "description": "test field",
+      "showInInspector": true
+    },
+    "Calender" : {
+      "name": "sampleCalendar",
+      "displayName": "sampleCalendar",
+      "type": "date",
+      "description": "test field",
+      "showInInspector": true
+    },
+    "Number" : {
+      "name": "sampleNumber",
+      "displayName": "sampleNumber",
+      "type": "double",
+      "description": "test field",
+      "showInInspector": true
+    },
+    "link" : {
+      "name": "sampleLink",
+      "displayName": "sampleLink",
+      "type": "link",
+      "description": "test link field",
+      "showInInspector": true
+    }
+  }
+}

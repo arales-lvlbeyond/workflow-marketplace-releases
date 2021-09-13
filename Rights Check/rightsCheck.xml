@@ -1,0 +1,124 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="rightsCheck"
+	name="Rights Check"
+	description=""
+	executionLabelExpression="Checking Expired Rights"
+	showInUserInterface="true"
+	subjectDOClassName=""
+	sdkVersion=""
+	>
+	
+	<initialStepName>find all expired assets</initialStepName>
+	
+
+	<queryStep name="find all expired assets"
+		executionLabelExpression="Find all assets expired before ${today}"
+		targetDataObjectClass="AssetMaster"
+		resultDataDef="expiredAssets"
+		>
+		<transition condition="${expiredAssets != null AND !expiredAssets.isEmpty()}">
+			<targetStepName>consolidate email body</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>notify no assets found</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+				<criteria>
+					<and>
+						<condition property="metadata.rightsEnd" op="lt"><test value="${today}"/></condition>
+					</and>
+				</criteria>
+			]]>
+		</criteria>
+	</queryStep>
+	
+	<createFailureNotificationStep name="notify no assets found"
+		executionLabelExpression="No asset found"
+		notificationTypeExpression="error"
+		notificationBodyExpression="Error: No expired asset found!"
+		nextStep="end" />
+	
+	<groovyStep name="consolidate email body"
+		executionLabelExpression="Building email body with found expired assets"
+		resultDataDef="emailBody"
+		nextStep="send expired email"
+		>
+		<script>
+          <![CDATA[
+			def emailBody = ""
+			
+			for (int i = 0; i < expiredAssets.size(); i++) {
+				emailBody = emailBody + "<li><a href='"+ reachUrl + "/#/assets/" + expiredAssets[i].assetType.toLowerCase() + "/" + expiredAssets[i].id +"'>" + expiredAssets[i].name + "</a></li>"
+			}
+			
+			return emailBody;
+			]]>
+        </script>
+	</groovyStep>
+	
+	<emailStep name="send expired email"
+		executionLabelExpression="Send email with expired assets"
+		emailAddressesExpression="${requesterEmail}"
+		subjectExpression="[REACH ENGINE] Your list of expired assets"
+		nextStep="end"
+		>
+		<body><![CDATA[<html lang="en" xmlns="http://www.w3.org/1999/xhtml" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
+		<body>
+		<table>
+			<td style="font-family: Roboto, RobotoDraft, Helvetica, Arial, sans-serif; font-size: 14px;">
+				<div style="width:600px; background-color:black; text-align:center;"><img
+						src="https://www.reachengine.com/hs-fs/hubfs/REbyLB_CMYK_1000x400_white_text.png"
+						alt="Logo" style="width:150px;"></div>
+				<div>
+					<p>Hello ${currentUser},<br>The following assets have <b>rights that have expired</b> as of <b>${today}</b>:</p>
+				</div>
+				<div><p>${emailBody}</p></div>
+				<div>
+					<hr>
+					<p>If you are having problems viewing this email, reach out to your Reach Engine administrator.</p>
+				</div>
+			</td>
+		</table>
+		</body>
+		</html>]]></body>
+	</emailStep>
+	
+	<!-- END STEPS	-->
+	<noopStep name="end"/>
+	
+	<!-- .......................................Context Data Defs............................................. -->
+	<!-- INPUT -->
+	
+	
+	<!-- PROCESSING -->
+	<contextDataDef name="emailBody"        dataType="String"/>
+	<contextDataDef name="expiredAssets"    dataType="Data Object"  multiple="true"/>
+	
+	<!-- DEFAULTS	-->
+	<contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('workflows.reachengine.url')}" />
+	<contextDataDef name="currentUser" dataType="String" defaultDataExpression="${#this.startedBy.firstName == null and #this.startedBy.lastName == null ? #this.startedBy.userName : (#this.startedBy.firstName == null ? '' : #this.startedBy.firstName + ' ') + (#this.startedBy.lastName == null ? '' : #this.startedBy.lastName) }" />
+	<contextDataDef name="requesterEmail" dataType="Email" defaultDataExpression="${#this.startedBy.emailAddress}"/>
+	<contextDataDef name="today" dataType="Date" defaultDataExpression="${#newDate()}"/>
+	
+</workflow>

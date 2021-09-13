@@ -1,0 +1,107 @@
+    <!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+    <workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="createPackageTransferToken"
+    name="Create Package Transfer Token"
+    executionLabelExpression="Creating Transfer Token for Package ${packageId}"
+    subjectDOClassName=""
+    showInUserInterface="false"
+    sdkVersion=""
+    resultDataDef="transferLink"
+>
+
+    <initialStepName>create transfer token</initialStepName>
+
+    <submitHttpStep name="create transfer token"
+        urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/packages/${packageId}/tokens"
+        requestMethodExpression="POST"
+        responseCodeDataDef="createTokenResponseCode"
+        responsePayloadDataDef="createTokenResponse"
+        executionLabelExpression="Creating Transfer Token"
+        >
+        <transition condition="${createTokenResponseCode.startsWith('2')}">
+            <targetStepName>get transfer link</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to create transfer token</targetStepName>
+        </transition>
+
+        <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+        <requestPayloadItem name="body">${contentBody.toString()}</requestPayloadItem>
+    </submitHttpStep>
+
+    <setContextData name="get transfer link"
+        targetDataDef="transferLink"
+        valueExpression="${createTokenResponse.get('url').asText()}"
+        nextStep="send transfer link"/>
+    
+    <executeSubflowStep name="send transfer link"
+        executionLabelExpression="Sending transfer link to ${emailAddresses}"
+        targetWorkflowId="sendSigniantEmail"
+        nextStep="end"
+    >
+        <subflowContextDataMapping parentDataDef="userEmail" subflowDataDef="emailAddresses"/>
+        <subflowContextDataMapping parentDataDef="transferLink" subflowDataDef="transferLink"/>
+        <subflowContextDataMapping parentDataDef="expirationDate" subflowDataDef="expirationDate"/>
+    </executeSubflowStep>
+
+
+    <failWorkflowStep name="failed to create transfer token"
+        executionLabelExpression="Failed to create transfer token, received code ${createTokenResponseCode}"
+        reasonExpression="Response: ${createTokenResponse.asText()}"/>
+
+    <noopStep name="end"/>
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <!--parent inputs-->
+    <contextDataDef name="portalId" dataType="String"/>
+    <contextDataDef name="packageId" dataType="String"/>
+    <contextDataDef name="expirationDate" dataType="Date/Time"/>
+    <contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String"/>
+    <contextDataDef name="grantToken" dataType="String"/>
+    <contextDataDef name="destinationPath" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.export.path') ?: #sysconfig('filesystem.root.temp')}" />
+
+    <!--API responses and codes-->
+    <contextDataDef name="createTokenResponseCode" dataType="String"/>
+    <contextDataDef name="createTokenResponse" dataType="JSON"/>
+    <contextDataDef name="transferLink" dataType="String"/>
+    <contextDataDef name="userEmail" dataType="Email" />
+
+
+    <contextDataDef name="contentBody" dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                  "user": {
+                    "email": "${userEmail}"
+                  },
+                  "grants": [
+                    "${grantToken}"
+                  ],
+                  "expiresOn": "${#formatDate('yyyy-MM-dd', expirationDate)}T00:00:00.000Z",
+                  "destinationPath": "${destinationPath}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+
+</workflow>

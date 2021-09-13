@@ -1,0 +1,68 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 to the last updated date of this file Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="wolftechPlaceholderAssetIngest"
+	name="Wolftech Placeholder Asset Ingest"
+	executionLabelExpression="Wolftech Placeholder Asset Ingest | Placeholder: ${subject.name} | File: ${fileToIngest.name}"
+	description=""
+	subjectDOClassName="AssetMaster"
+	subjectQualifierExpression="${getContents().isEmpty()}"
+	showInUserInterface="true"
+	deadlineExpression=""
+	sdkVersion="5.21"
+	>
+
+	<initialStepName>ingest asset</initialStepName>
+	
+	
+	<executeSubflowStep name="ingest asset"
+		targetWorkflowId="_anyPlaceholderAssetIngest"
+		subjectChangePath="${asset}"
+		executionLabelExpression="Ingest file (${fileToIngest.name}) into asset (${subject.name})"
+		continueOnException="false"
+		nextStep="update wolftech status"
+		>
+		<!-- ingest -->
+		<subflowContextDataMapping parentDataDef="fileToIngest"             subflowDataDef="fileToIngest"/>
+		<subflowContextDataMapping parentDataDef="metadataForm"             subflowDataDef="metadataForm"/>
+	</executeSubflowStep>
+	
+	<executeSubflowStep name="update wolftech status"
+		targetWorkflowId="updateWolftechAssetStatus"
+		subjectChangePath="${asset}"
+		executionLabelExpression="Updating Wolftech status for: (${subject.name})"
+		continueOnException="false"
+		nextStep="end"
+		/>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"	pctComplete="100"/>
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- ....... User Input Variables ........ -->
+	<contextDataDef name="fileToIngest" 		    dataType="File"				userInput="true"    label="File To Ingest"   required="true" displayIndex="1"/>
+	<contextDataDef name="metadataForm"             dataType="MetadataForm"     userInput="true"    label="Metadata Form" displayIndex="3"/>
+	
+	<!--  Processing  -->
+	<contextDataDef name="asset"                    dataType="Data Object"      defaultDataExpression="${subject}"/>
+
+</workflow>

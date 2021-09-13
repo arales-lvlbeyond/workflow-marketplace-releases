@@ -1,0 +1,165 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+		id="sendAssetToS3"
+		name="Send asset to S3"
+		executionLabelExpression="Send ${subject.assetType.toLowerCase()} asset to S3 | ${subject.name}"
+		subjectDOClassName="AssetMaster"
+		subjectQualifierExpression="${!originalContent.truncatedFlag}"
+		showInUserInterface="true"
+		sdkVersion=""
+		hasDownload="false"
+>
+
+	<initialStepName>Get asset metadata</initialStepName>
+	
+
+	<!--    ASSET METADATA  -->
+	<groovyStep name="Get asset metadata"
+		resultDataDef="jsonMetadata"
+		nextStep="Combine metadata"
+	>
+		<script>
+			<![CDATA[
+			import com.routeto1.spring.ApplicationContextHolder
+			import com.levelsbeyond.service.inventory.MetadataService
+			MetadataService metadataService = ApplicationContextHolder.getApplicationContext().getBean(MetadataService.class)
+			return metadataService.toMetadataSetDTO(asset.getMetadata()).getMetadata()
+			]]>
+		</script>
+	</groovyStep>
+	
+	
+	<executeSubflowStep name="Combine metadata"
+		targetWorkflowId="ingestNormalizeMetadata"
+		resultDataDef="metadataFormJson"
+		nextStep="Write json file"
+	>
+		<subflowContextDataMapping parentDataDef="metadataForm" subflowDataDef="metadataForm"/>
+		<subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata"/>
+	</executeSubflowStep>
+	
+	
+	<groovyStep name="Write json file"
+		resultDataDef="metadataFile"
+		>
+		<transition condition="${metadataFile.exists()}">
+			<targetStepName>Copy json file to S3</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>File not found</targetStepName>
+		</transition>
+		
+		<script>
+			<![CDATA[
+			import groovy.json.JsonOutput
+			
+			def newFile = new File(metadataFilePath)
+			if (!newFile.exists()) {
+				newFile.getParentFile().mkdirs()
+			}
+			newFile.write(JsonOutput.prettyPrint(metadataFormJson.toString()))
+			
+			return newFile
+			]]>
+		</script>
+	</groovyStep>
+	
+	
+	<!--    COPY FILES TO S3    -->
+	<runCommandStep name="Copy json file to S3"
+		executionLabelExpression="Copy ${metadataFile.absolutePath} >> ${s3Path}"
+		executablePathExpression="/usr/bin/aws"
+		resultCodeDataDef="awsReturnCode"
+	>
+		<transition condition="${awsReturnCode != 0}">
+			<targetStepName>aws cli error</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Delete temp json file</targetStepName>
+		</transition>
+		
+		<arg>s3</arg>
+		<arg>cp</arg>
+		<arg>${metadataFile.absolutePath}</arg>
+		<arg>${s3Path}</arg>
+	</runCommandStep>
+	
+	
+	<deleteFileStep name="Delete temp json file"
+		sourceFilesExpression="${#filepath(metadataFilePath)}"
+		nextStep="Copy asset file to S3" />
+	
+	
+	<runCommandStep name="Copy asset file to S3"
+		executionLabelExpression="Copy ${#mapPath(targetContentFile.absolutePath, 's3mapping')} >> ${s3Path}"
+		executablePathExpression="/usr/bin/aws"
+		resultCodeDataDef="awsReturnCode"
+		>
+		<transition condition="${awsReturnCode != 0}">
+			<targetStepName>aws cli error</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		
+		<arg>s3</arg>
+		<arg>cp</arg>
+		<arg>${#mapPath(targetContentFile.absolutePath, 's3mapping')}</arg>
+		<arg>${s3Path}</arg>
+	</runCommandStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<failWorkflowStep name="File not found" reasonExpression="404 - File not found" />
+	
+	<failWorkflowStep name="aws cli error" reasonExpression="AWS CLI error. Check log for details." />
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="contentUse"           label="Content Use"          dataType="String"       userInput="true"    required="true">
+		<picklist>
+			<picklistItem value="SOURCE" label="Source" index="1"/>
+			<picklistItem value="MEZZANINE" label="Mezzanine" index="2"/>
+			<picklistItem value="PROXY" label="Proxy" index="3"/>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="metadataForm" label="Metadata Form" dataType="MetadataForm" userInput="true" required="false" />
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="metadataFormJson" dataType="JSON" />
+	<contextDataDef name="jsonMetadata" dataType="JSON" />
+	<contextDataDef name="metadataFile" dataType="File" />
+	<contextDataDef name="awsReturnCode" dataType="Integer" />
+	
+	<!-- ......... DEFAULTS ........... -->
+	<contextDataDef name="asset" dataType="Data Object" defaultDataExpression="${subject}" />
+	<contextDataDef name="targetContent" dataType="Data Object" multiple="true" defaultDataExpression="${contentUse.equals('SOURCE') ? subject.originalContent : contentUse.equals('MEZZANINE') ? subject.mezzanine : subject.proxy}"/>
+	<contextDataDef name="targetContentFile" dataType="File" defaultDataExpression="${targetContent.file}" />
+	<contextDataDef name="s3Path" dataType="String" defaultDataExpression="${#sysconfig('workflows.s3.path')}/${#uuid().toString()}/" />
+	<contextDataDef name="metadataFilePath" dataType="String" defaultDataExpression="${#sysconfig('temp.path')}/${#uuid().toString()}/${#baseFilename(subject.name)}.json" />
+
+
+
+</workflow>

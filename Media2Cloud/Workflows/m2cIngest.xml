@@ -1,0 +1,197 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="m2cIngest"
+          name="M2C Ingest"
+          executionLabelExpression="Media2Cloud Ingest - Metadata Path ${metadataJsonS3Path != null ? metadataJsonS3Path : ''} - Source Path ${sourceS3Path != null ? sourceS3Path : ''}"
+          description="From a source video, proxy video, and metadata json data file, ingest the asset, create/add to timeline. If subtitle file exists, ingest and add to the timeline as well."
+          showInUserInterface="false"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion="">
+
+    <initialStepName>validate input</initialStepName>
+
+    <noopStep
+            name="validate input"
+            executionLabelExpression="Input: Source Path: ${sourceFile != null ? sourceFile.absolutePath : 'NULL'}. Proxy Path: ${proxyS3Path != null ? proxyS3Path : 'NULL'}. Metadata Path: ${metadataJsonS3Path != null ? metadataJsonS3Path : 'NULL'}. Subtitle Path: ${subtitleS3Path != null ? subtitleS3Path : 'NULL'}.">
+        <transition condition="${sourceS3Path == null}">
+            <targetStepName>source s3 path missing</targetStepName>
+        </transition>
+        <transition condition="${proxyS3Path == null}">
+            <targetStepName>proxy s3 path missing</targetStepName>
+        </transition>
+        <transition condition="${metadataJsonS3Path == null}">
+            <targetStepName>metadata json s3 path missing</targetStepName>
+        </transition>
+        <transition condition="${sourceFile == null or !#fileExists(sourceFile.absolutePath)}">
+            <targetStepName>source file not found</targetStepName>
+        </transition>
+        <transition condition="${proxyFile == null or !#fileExists(proxyFile.absolutePath)}">
+            <targetStepName>proxy file not found</targetStepName>
+        </transition>
+        <transition condition="${jsonFile == null or !#fileExists(jsonFile.absolutePath)}">
+            <targetStepName>json file not found</targetStepName>
+        </transition>
+        <transition condition="${!#picklistItemExists('categoryName', categoryName)}">
+            <targetStepName>create new category name picklist item</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>ingest source and proxy</targetStepName>
+        </transition>
+    </noopStep>
+
+    <addPickListItemStep
+            name="create new category name picklist item"
+            executionLabelExpression="Add ${categoryName} as new picklist item for Category Name"
+            propertyName="categoryName"
+            pickListLabel="${categoryName}"
+            nextStep="add category name to json metadata"/>
+
+    <setContextData
+            name="add category name to json metadata"
+            devStep="true"
+            targetDataDef="jsonMetadata"
+            valueExpression="${jsonMetadata.put('categoryName', #picklistValue('categoryName', categoryName))}"
+            nextStep="ingest source and proxy"/>
+
+    <executeSubflowStep
+            name="ingest source and proxy"
+            executionLabelExpression="Ingest source and proxy files to create asset.. Result asset: ${assetMaster.name}"
+            targetWorkflowId="_anyAssetIngest"
+            resultDataDef="assetMaster"
+            nextStep="parse json">
+        <subflowContextDataMapping parentDataDef="sourceFile" subflowDataDef="fileToIngest"/>
+        <subflowContextDataMapping parentDataDef="proxyFile" subflowDataDef="proxyFile"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="parse json"
+            targetWorkflowId="parseRekognitionData"
+            subjectChangePath="${assetMaster}"
+            resultDataDef="timeline">
+        <transition condition="${subtitleFile != null and #fileExists(subtitleFile.absolutePath)}">
+            <targetStepName>copy subtitle object to file</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="jsonFile" subflowDataDef="jsonFile"/>
+    </executeSubflowStep>
+
+    <copyFileStep
+            name="copy subtitle object to file"
+            devStep="true"
+            sourceFileExpression="${subtitleFile}"
+            targetDirectoryExpression="${tempPath}"
+            targetFilenameExpression="${#baseFilename(sourceFile.absolutePath)}_transcript.vtt"
+            resultDataDef="tempSubtitleFile"
+            nextStep="set file temp subtitle file paths"/>
+
+    <setContextData
+            name="set file temp subtitle file paths"
+            devStep="true"
+            nextStep="create vtt proxy">
+        <set targetDataDef="tempSubtitleFilePath" valueExpression="${tempSubtitleFile.absolutePath}"/>
+        <set targetDataDef="vttProxyFilePath" valueExpression="${vttProxyFile.absolutePath}"/>
+    </setContextData>
+
+    <groovyStep
+            name="create vtt proxy"
+            devStep="true"
+            resultDataDef="vttProxyFile">
+        <transition condition="${#fileExists(vttProxyFile.absolutePath)}">
+            <targetStepName>ingest subtitle</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <script>
+            <![CDATA[
+            File resultFile = new File(vttProxyFilePath)
+            File sourceFile = new File(tempSubtitleFilePath)
+            resultFile << 'WEBVTT\n\n'
+            resultFile << 'NOTE Duration:' + assetMaster.mezzanineContent.duration + '\n\n'
+            resultFile << 'NOTE Language:en\n'
+            sourceFile.eachLine { line ->
+                if (line != 'WEBVTT') resultFile << line + '\n'
+            }
+            return resultFile
+            ]]>
+        </script>
+    </groovyStep>
+
+    <executeSubflowStep
+            name="ingest subtitle"
+            executionLabelExpression="Ingest subtitle file ${#filename(tempSubtitleFile.absolutePath)}"
+            targetWorkflowId="_anyAssetIngest"
+            resultDataDef="subtitleAsset"
+            nextStep="add subtitle asset to timeline">
+        <subflowContextDataMapping parentDataDef="tempSubtitleFile" subflowDataDef="fileToIngest"/>
+        <subflowContextDataMapping parentDataDef="vttProxyFile" subflowDataDef="proxyFile"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="asyncSubtitleProxy" subflowDataDef="asyncProxies"/>
+    </executeSubflowStep>
+
+    <nimbus:addAssetToTimelineStep
+            name="add subtitle asset to timeline"
+            targetAssetExpression="${subtitleAsset}"
+            targetTimelineExpression="${timeline}"
+            nextStep="cleanup"/>
+
+    <deleteFileStep
+            name="cleanup"
+            devStep="true"
+            sourceFilesExpression="${tempPath}"
+            nextStep="end"/>
+
+    <failWorkflowStep name="source s3 path missing" reasonExpression="Missing required input: sourceS3Path"/>
+    <failWorkflowStep name="proxy s3 path missing" reasonExpression="Missing required input: proxyS3Path"/>
+    <failWorkflowStep name="metadata json s3 path missing" reasonExpression="Missing required input: metadataJsonS3Path"/>
+    <failWorkflowStep name="source file not found" reasonExpression="Source file unreadable by Reach Engine from S3 path: ${sourceS3Path}" executionLabelExpression="Source file unreadable by Reach Engine from S3 path: ${sourceS3Path}. Check that the path is good, that RE has read access to the bucket/key, and that the Map Path bean 's3mapping' is properly configured for the bucket name."/>
+    <failWorkflowStep name="proxy file not found" reasonExpression="Proxy file unreadable by Reach Engine from S3 path: ${proxyS3Path}" executionLabelExpression="Proxy file unreadable by Reach Engine from S3 path: ${proxyS3Path}. Check that the path is good, that RE has read access to the bucket/key, and that the Map Path bean 's3mapping' is properly configured for the bucket name."/>
+    <failWorkflowStep name="json file not found" reasonExpression="JSON file unreadable by Reach Engine from S3 path: ${metadataJsonS3Path}" executionLabelExpression="JSON file unreadable by Reach Engine from S3 path: ${metadataJsonS3Path}. Check that the path is good, that RE has read access to the bucket/key, and that the Map Path bean 's3mapping' is properly configured for the bucket name."/>
+
+    <noopStep name="end"/>
+
+    <!-- Input -->
+    <!--
+        Source S3 Path will be a json file that contains metadata (from an archive restore process) that includes
+        a path to the actual source.
+    -->
+    <contextDataDef name="sourceS3Path" dataType="String" label="Source S3 Path" userInput="true" required="true" displayIndex="1"/>
+    <contextDataDef name="proxyS3Path" dataType="String" label="Proxy S3 Path" userInput="true" required="true" displayIndex="2"/>
+    <contextDataDef name="metadataJsonS3Path" dataType="String" label="Metadata JSON S3 Path" userInput="true" required="true" displayIndex="3"/>
+    <contextDataDef name="subtitleS3Path" dataType="String" label="Subtitle S3 Path" userInput="true" displayIndex="4"/>
+
+    <!-- Internal -->
+    <contextDataDef name="sourceFile" dataType="File" defaultDataExpression="${#mapPathReverse(sourceS3Path, 's3mapping')}"/>
+    <contextDataDef name="proxyFile" dataType="File" defaultDataExpression="${#mapPathReverse(proxyS3Path, 's3mapping')}"/>
+    <contextDataDef name="jsonFile" dataType="File" defaultDataExpression="${#mapPathReverse(metadataJsonS3Path, 's3mapping')}"/>
+    <contextDataDef name="subtitleFile" dataType="File" defaultDataExpression="${#mapPathReverse(subtitleS3Path, 's3mapping')}"/>
+
+    <contextDataDef name="jsonMetadata" dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+            {
+                demoTemp: "${true}"
+            }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+
+    <contextDataDef name="assetMaster" dataType="Data Object"/>
+    <contextDataDef name="timeline" dataType="Data Object"/>
+    <contextDataDef name="subtitleAsset" dataType="Data Object"/>
+    <contextDataDef name="asyncSubtitleProxy" dataType="Boolean" defaultDataExpression="${false}"/>
+    <contextDataDef name="tempPath" dataType="String" defaultDataExpression="${#sysconfig('filesystem.root.temp')}/${#uuid().toString()}"/>
+    <contextDataDef name="tempSubtitleFile" dataType="File"/>
+    <contextDataDef name="vttProxyFile" dataType="File" defaultDataExpression="${tempPath}/${#baseFilename(subtitleFile.absolutePath)}-proxy.vtt"/>
+
+    <contextDataDef name="tempSubtitleFilePath" dataType="String"/>
+    <contextDataDef name="vttProxyFilePath" dataType="String"/>
+
+    <contextDataDef name="categoryName" dataType="String" defaultDataExpression="NAB_Demo"/>
+</workflow>

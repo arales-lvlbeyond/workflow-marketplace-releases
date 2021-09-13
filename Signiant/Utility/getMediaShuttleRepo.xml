@@ -1,0 +1,102 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="getMediaShuttleRepo"
+	name="Get Media Shuttle Repo"
+	executionLabelExpression="Retrieving Media Shuttle repo..."
+	subjectDOClassName=""
+	showInUserInterface="false"
+	resultDataDef="repositoryPath"
+	sdkVersion=""
+>
+    
+    <initialStepName>get storage type</initialStepName>
+    
+    <executeSubflowStep name="get storage type"
+	    targetWorkflowId="getStorageType"
+	    executionLabelExpression="Get storage type"
+	    resultDataDef="storageType"
+    >
+        <transition condition="${storageType.get('type').asText() == 's3'}">
+            <targetStepName>set s3 signiant repo path</targetStepName>
+        </transition>
+        <transition condition="${storageType.get('type').asText() == 'local'}">
+            <targetStepName>get portal storage repo</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>error storage type</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+    </executeSubflowStep>
+    
+    <submitHttpStep name="get portal storage repo"
+	    urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/storage"
+	    requestMethodExpression="GET"
+	    responseCodeDataDef="getStorageResponseCode"
+	    responsePayloadDataDef="getStorageResponse"
+	    executionLabelExpression="Requesting Storage for Portal: ${portalId}"
+    >
+    <transition condition="${getStorageResponseCode.startsWith('2')}">
+        <targetStepName>set storage repo path</targetStepName>
+    </transition>
+    <transition condition="${true}">
+        <targetStepName>failed to retrieve storage</targetStepName>
+    </transition>
+    
+    <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+    </submitHttpStep>
+    
+    <setContextData name="set s3 signiant repo path"
+	    executionLabelExpression="Set s3 storage repo path: ${repositoryPath}"
+	    targetDataDef="repositoryPath"
+	    valueExpression="${ 's3://' + storageType.get('configuration').get('bucket').asText() + '/' + storageType.get('configuration').get('filePrefix').asText() }"
+	    nextStep="end" />
+    
+    <setContextData name="set storage repo path"
+	    executionLabelExpression="Set storage repo path"
+	    targetDataDef="repositoryPath"
+	    valueExpression="${getStorageResponse.get('repositoryPath').asText()}"
+	    nextStep="end" />
+    
+    <noopStep name="end" />
+    
+    <failWorkflowStep name="error storage type"
+	    reasonExpression="Storage type: ${storageType}"
+	    executionLabelExpression="Could not determine storage type"
+    />
+    
+    <failWorkflowStep name="failed to retrieve storage"
+	    executionLabelExpression="Failed to add content, received code ${getStorageResponseCode}"
+	    reasonExpression="Response: ${getStorageResponse.asText()}"/>
+	
+	<!--Context Data Defs-->
+	<contextDataDef name="portalId" dataType="String"/>
+    <contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+    
+    <contextDataDef name="getStorageResponseCode"           dataType="String"/>
+    <contextDataDef name="getStorageResponse"               dataType="JSON"/>
+    
+    <contextDataDef name="storageType" dataType="JSON" />
+    <contextDataDef name="repositoryPath" dataType="String" />
+</workflow>

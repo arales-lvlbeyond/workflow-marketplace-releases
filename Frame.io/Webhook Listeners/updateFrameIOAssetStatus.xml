@@ -1,0 +1,182 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="updateFrameIOAssetStatus"
+	name="Update Frame.io Asset Status"
+	executionLabelExpression="Update Frame.io Asset Status"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	hasDownload="false"
+>
+	
+	<initialStepName>get asset label</initialStepName>
+	
+	<!-- ................................................... Get Project Details .................................................... -->
+	<runCommandStep name="get asset label"
+		executionLabelExpression="Check if asset label = 'approved'"
+		executablePathExpression="/usr/bin/curl"
+		stdoutDataDef="frameioAssetResponseJSON"
+		resultCodeDataDef="frameioAssetResponseCode"
+	>
+		<arg>--request</arg>
+		<arg>GET</arg>
+		<arg>--url</arg>
+		<arg>${frameioURL}/assets/${resourceId}</arg>
+		<arg>--header</arg>
+		<arg>Authorization: Bearer ${frameBearer}</arg>
+		<arg>--header</arg>
+		<arg>Content-Type: application/json</arg>
+		
+		<transition condition="${frameioAssetResponseJSON.label.toString() == 'approved'}">
+			<targetStepName>Get project name</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>set frameio status</targetStepName>
+		</transition>
+	</runCommandStep>
+	
+	<setContextData name="set frameio status"
+		targetDataDef="frameioStatusFieldValue"
+		valueExpression="In Review"
+		nextStep="update asset"
+		devStep="true"
+		/>
+	
+	<executeSubflowStep name="update asset"
+		targetWorkflowId="updateFrameIOAsset"
+		executionLabelExpression="Update Asset"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="frameioStatusFieldValue" subflowDataDef="frameioStatusFieldValue"/>
+		<subflowContextDataMapping parentDataDef="projectId" subflowDataDef="projectId"/>
+		<subflowContextDataMapping parentDataDef="resourceId" subflowDataDef="resourceId"/>
+		<subflowContextDataMapping parentDataDef="resourceType" subflowDataDef="resourceType"/>
+		<subflowContextDataMapping parentDataDef="teamId" subflowDataDef="teamId"/>
+		<subflowContextDataMapping parentDataDef="type" subflowDataDef="type"/>
+		<subflowContextDataMapping parentDataDef="userId" subflowDataDef="userId"/>
+	</executeSubflowStep>
+	
+	
+	<runCommandStep name="Get project name"
+		executablePathExpression="/usr/bin/curl"
+		stdoutDataDef="frameioProjectResponseJSON"
+		resultCodeDataDef="frameioProjectResponseCode"
+		nextStep="Set project name"
+	>
+		<arg>--request</arg>
+		<arg>GET</arg>
+		<arg>--url</arg>
+		<arg>${frameioURL}/projects/${projectId}</arg>
+		<arg>--header</arg>
+		<arg>Authorization: Bearer ${frameBearer}</arg>
+		<arg>--header</arg>
+		<arg>Content-Type: application/json</arg>
+	</runCommandStep>
+	
+	
+	<setContextData name="Set project name"
+		targetDataDef="projectName"
+		valueExpression="${frameioProjectResponseJSON.name}"
+		nextStep="Get corresponding collection"
+		devStep="true"
+	/>
+	
+	<queryStep name="Get corresponding collection"
+		executionLabelExpression="Check for existing Collection: ${projectName}"
+		targetDataObjectClass="AssetCollection"
+		resultDataDef="collection"
+		nextStep="Get categories"
+	>
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="name" op="eq">
+                            <test value="${projectName}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<queryStep name="Get categories"
+		targetDataObjectClass="AssetCategory"
+		resultDataDef="categories"
+		nextStep="Process Frame.io asset">
+		<criteria>
+			<![CDATA[
+              <criteria>
+                <and>
+                    <condition property="name" op="eq">
+                      <test value="${categoryNames}"/>
+                    </condition>
+                </and>
+              </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<!-- ................................................... Process Frame.io Asset .................................................... -->
+	<executeSubflowStep name="Process Frame.io asset"
+		targetWorkflowId="processFrameioAsset"
+		subjectChangePath="${frameioAssetResponseJSON}"
+		subflowTargetDataDef="assetJSON"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="delete" subflowDataDef="delete"/>
+		<subflowContextDataMapping parentDataDef="collection" subflowDataDef="collection"/>
+		<subflowContextDataMapping parentDataDef="categoryNames" subflowDataDef="categoryNames"/>
+	</executeSubflowStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="projectId" dataType="String"/>
+	<contextDataDef name="resourceId" dataType="String"/>
+	<contextDataDef name="resourceType" dataType="String"/>
+	<contextDataDef name="teamId" dataType="String"/>
+	<contextDataDef name="type" dataType="String"/>
+	<contextDataDef name="userId" dataType="String"/>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="frameioURL"               dataType="String"       defaultDataExpression="https://api.frame.io/v2"/>
+	<contextDataDef name="frameBearer"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"   hidden="true"/>
+	<contextDataDef name="frameioAssetResponseJSON" dataType="JSON"/>
+	<contextDataDef name="frameioAssetResponseCode" dataType="Integer"/>
+	<contextDataDef name="frameioProjectResponseJSON" dataType="JSON"/>
+	<contextDataDef name="frameioProjectResponseCode" dataType="Integer"/>
+	<contextDataDef name="frameioStatusFieldValue" dataType="String"/>
+	
+	<!-- ............ OUTPUT ............. -->
+	<contextDataDef name="delete" dataType="Boolean" defaultDataExpression="false"/>
+	<contextDataDef name="projectName" dataType="String"/>
+	<contextDataDef name="collection" dataType="Data Object"/>
+	<contextDataDef name="categoryNames" dataType="String" multiple="true" defaultDataExpression="${#sysconfig('workflow.frameio.default.categories')}"/>
+	<contextDataDef name="categories" dataType="Data Object" multiple="true"/>
+
+</workflow>

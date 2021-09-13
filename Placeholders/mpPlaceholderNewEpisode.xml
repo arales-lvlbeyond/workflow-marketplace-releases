@@ -1,0 +1,327 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="mpPlaceholderNewEpisode"
+          name="New Episode"
+          executionLabelExpression="Create Episode Placeholders for ${episodeCollection.name}"
+          description="Create a collection that represents an episode."
+          showInUserInterface="true"
+          group="Placeholder Creation"
+          subjectDOClassName=""
+          sdkVersion=""
+>
+
+    <initialStepName>check for existing episode collection</initialStepName>
+
+
+    <queryStep
+            name="check for existing episode collection"
+            executionLabelExpression="Checking for existing collection with name ${episodeCollectionName}"
+            pctComplete="5"
+            resultDataDef="episodeCollection"
+            targetDataObjectClass="AssetCollection">
+        <transition condition="${ episodeCollection == null }">
+            <targetStepName>create episode collection</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>update episode collection metadata</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                  <and>
+                    <condition property="name" op="eq" nullTargets="false">
+                      <test value="${episodeCollectionName}"/>
+                    </condition>
+                  </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <saveDataObjectStep
+            name="create episode collection"
+            executionLabelExpression="Creating new collection ${episodeCollectionName}"
+            pctComplete="10"
+            targetDataObjectClass="AssetCollection"
+            resultDataDef="episodeCollection"
+            nextStep="update episode collection metadata">
+        <property name="name">${episodeCollectionName}</property>
+    </saveDataObjectStep>
+
+    <saveDataObjectStep
+            name="update episode collection metadata"
+            executionLabelExpression="Adding meta: ${episodeJsonMetadata.toString()}"
+            pctComplete="15"
+            dataObjectExpression="${episodeCollection.metadata}"
+            jsonValuesDataDef="episodeJsonMetadata"
+            nextStep="set episode collection category"/>
+
+    <nimbus:changeMetaCategoryStep
+            name="set episode collection category"
+            executionLabelExpression="Adding Category ${episodeCategoryName} to Collection ${episodeCollection.name}"
+            targetObjectExpression="${episodeCollection}"
+            nextStep="check for existing series collection">
+        <nimbus:addCategory>${episodeCategoryName}</nimbus:addCategory>
+    </nimbus:changeMetaCategoryStep>
+
+    <!-- Check for series collection and create if needed -->
+    <queryStep
+            name="check for existing series collection"
+            executionLabelExpression="Checking for existing collection with name ${seriesCollectionName}"
+            pctComplete="20"
+            resultDataDef="seriesCollection"
+            targetDataObjectClass="AssetCollection">
+        <transition condition="${ seriesCollection == null }">
+            <targetStepName>create series collection</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>check for existing season collection</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                  <and>
+                    <condition property="name" op="eq" nullTargets="false">
+                      <test value="${seriesCollectionName}"/>
+                    </condition>
+                  </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <saveDataObjectStep
+            name="create series collection"
+            executionLabelExpression="Creating new collection ${seriesCollectionName}"
+            pctComplete="25"
+            targetDataObjectClass="AssetCollection"
+            resultDataDef="seriesCollection"
+            nextStep="update series collection metadata">
+        <property name="name">${seriesCollectionName}</property>
+    </saveDataObjectStep>
+
+    <saveDataObjectStep
+            name="update series collection metadata"
+            executionLabelExpression="Adding meta: ${seriesJsonMetadata.toString()}"
+            pctComplete="30"
+            dataObjectExpression="${seriesCollection.metadata}"
+            jsonValuesDataDef="seriesJsonMetadata"
+            nextStep="set series collection category" />
+
+    <nimbus:changeMetaCategoryStep
+            name="set series collection category"
+            executionLabelExpression="Adding Category ${seriesCategoryName} to Collection ${seriesCollection.name}"
+            targetObjectExpression="${seriesCollection}"
+            nextStep="check for existing season collection">
+        <nimbus:addCategory>${seriesCategoryName}</nimbus:addCategory>
+    </nimbus:changeMetaCategoryStep>
+
+    <!-- Check for season collection and create if needed -->
+    <queryStep
+            name="check for existing season collection"
+            executionLabelExpression="Checking for existing collection with name ${seasonCollectionName}"
+            pctComplete="35"
+            resultDataDef="seasonCollection"
+            targetDataObjectClass="AssetCollection">
+        <transition condition="${ seasonCollection == null }">
+            <targetStepName>create season collection</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>create default language placeholders</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                  <and>
+                    <condition property="name" op="eq" nullTargets="false">
+                      <test value="${seasonCollectionName}"/>
+                    </condition>
+                  </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <saveDataObjectStep
+            name="create season collection"
+            executionLabelExpression="Creating new collection ${seasonCollectionName}"
+            pctComplete="40"
+            targetDataObjectClass="AssetCollection"
+            resultDataDef="seasonCollection"
+            nextStep="update season collection metadata">
+        <property name="name">${seasonCollectionName}</property>
+    </saveDataObjectStep>
+
+    <saveDataObjectStep
+            name="update season collection metadata"
+            executionLabelExpression="Adding meta: ${seasonJsonMetadata.toString()}"
+            pctComplete="45"
+            dataObjectExpression="${seasonCollection.metadata}"
+            jsonValuesDataDef="seasonJsonMetadata"
+            nextStep="set season collection category" />
+
+    <nimbus:changeMetaCategoryStep
+            name="set season collection category"
+            executionLabelExpression="Adding Category ${seasonCategoryName} to Collection ${seasonCollection.name}"
+            targetObjectExpression="${seasonCollection}"
+            nextStep="create default language placeholders">
+        <nimbus:addCategory>${seasonCategoryName}</nimbus:addCategory>
+    </nimbus:changeMetaCategoryStep>
+    <!-- Finished with collections -->
+
+    <executeSubflowStep
+            name="create default language placeholders"
+            pctComplete="50"
+            targetWorkflowId="${createEpisodeSubflowId}">
+        <transition condition="${languages.size() > 0}">
+            <targetStepName>create additional language placeholders</targetStepName>
+        </transition>
+        <!--        <transition condition="${imdb != null and imdb != ''}">-->
+        <!--            <targetStepName>get imdb data</targetStepName>-->
+        <!--        </transition>-->
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="episodeCollection"        subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="defaultLanguage"          subflowDataDef="language"/>
+        <subflowContextDataMapping parentDataDef="format"                   subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="defaultContainsForced"    subflowDataDef="containsForced"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create additional language placeholders"
+            subjectChangePath="${languages}"
+            subflowTargetDataDef="language"
+            pctComplete="50"
+            targetWorkflowId="${createEpisodeSubflowId}">
+        <!--        <transition condition="${imdb != null and imdb != ''}">-->
+        <!--            <targetStepName>get imdb data</targetStepName>-->
+        <!--        </transition>-->
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="episodeCollection"        subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="format"                   subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="addOnly"                  subflowDataDef="addOnly"/>
+        <subflowContextDataMapping parentDataDef="additionalContainsForced" subflowDataDef="containsForced"/>
+    </executeSubflowStep>
+
+    <!--    <executeSubflowStep-->
+    <!--            name="get imdb data"-->
+    <!--            targetWorkflowId="${getImdbDataSubflowId}"-->
+    <!--            subjectChangePath="${episodeCollection}"-->
+    <!--            nextStep="end">-->
+    <!--        <subflowContextDataMapping parentDataDef="imdb" subflowDataDef="imdb"/>-->
+    <!--    </executeSubflowStep>-->
+
+    <failWorkflowStep
+            name="episode collection exists"
+            executionLabelExpression="Collection ${episodeCollection.name} already exists. Remove this collection and all contents and retry if you'd like!"
+            reasonExpression="Collection Exists"/>
+
+    <noopStep name="end" />
+
+    <!-- ................................................... Data Defs .................................................... -->
+
+    <!-- ............ INPUT ............. -->
+
+    <contextDataDef name="metadataForm"             dataType="MetadataForm"     userInput="true"    required="true"     label="Metadata Form"/>
+    <contextDataDef name="metadataFormType"         dataType="String"           defaultDataExpression="access">
+        <description>
+            TEMPORARY!!! (Forms will be standardized to the same format in the future)
+            Valid types = "access" or "panel"
+        </description>
+    </contextDataDef>
+
+    <contextDataDef name="series"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameSeries)?.asText()}"/>
+    <contextDataDef name="season"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameSeason)?.asText()}"/>
+    <contextDataDef name="episodeNumber"            dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameEpisodeNumber)?.asText()}"/>
+    <contextDataDef name="provider"                 dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameProvider)?.asText()}"/>
+    <contextDataDef name="format"                   dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameFormat)?.asText()}"/>
+    <contextDataDef name="containsForcedList"       dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameContainsForcedNarrative)?.asText()}"/>
+    <contextDataDef name="languages"                dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameLanguages)}" multiple="true"/>
+
+    <!--  Imdb will not be used in this phase, however, code will remain (commented out) for possible refactor in future  -->
+    <!--    <contextDataDef name="imdb"                     dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameImdb)?.asText()}"/>-->
+    <!--    <contextDataDef name="mpMetadataFieldNameImdb"  dataType="String"           defaultDataExpression="${'mpPlaceholderImdb'}"/>-->
+    <!--    <contextDataDef name="getImdbDataSubflowId"     dataType="String" 		    defaultDataExpression="getImdbData" />-->
+
+    <!-- ......... PROCESSING ........... -->
+
+    <!-- metadata field/property names -->
+    <contextDataDef name="mpMetadataFieldNameSeries"                    dataType="String"           defaultDataExpression="${'mpPlaceholderSeries'}"/>
+    <contextDataDef name="mpMetadataFieldNameSeason"                    dataType="String"           defaultDataExpression="${'mpPlaceholderSeason'}"/>
+    <contextDataDef name="mpMetadataFieldNameEpisodeNumber"             dataType="String"           defaultDataExpression="${'mpPlaceholderEpisodeNumber'}"/>
+    <contextDataDef name="mpMetadataFieldNameProvider"                  dataType="String"           defaultDataExpression="${'mpPlaceholderProvider'}"/>
+    <contextDataDef name="mpMetadataFieldNameFormat"                    dataType="String"           defaultDataExpression="${'mpPlaceholderFormat'}"/>
+    <contextDataDef name="mpMetadataFieldNameContainsForcedNarrative"   dataType="String"           defaultDataExpression="${'mpPlaceholderContainsForcedNarrative'}"/>
+    <contextDataDef name="mpMetadataFieldNameLanguages"                 dataType="String"           defaultDataExpression="${'mpPlaceholderLanguages'}"/>
+
+    <!-- Subflows-->
+    <contextDataDef name="createEpisodeSubflowId"   dataType="String" 		    defaultDataExpression="mpPlaceholderCreateNewEpisodePlaceholders" />
+
+    <!-- Collections-->
+    <contextDataDef name="seriesCollection"         dataType="Data Object"/>
+    <contextDataDef name="seasonCollection"         dataType="Data Object"/>
+    <contextDataDef name="episodeCollection"        dataType="Data Object" />
+    <contextDataDef name="seriesCollectionName"     dataType="String"           defaultDataExpression="${#picklistLabel(mpMetadataFieldNameSeries,series)}"/>
+    <contextDataDef name="seasonCollectionName"     dataType="String"           defaultDataExpression="${seriesCollectionName} - S${#picklistLabel(mpMetadataFieldNameSeason,season)}"/>
+    <contextDataDef name="episodeCollectionName"    dataType="String"           defaultDataExpression="${seasonCollectionName} - E${#picklistLabel(mpMetadataFieldNameEpisodeNumber,episodeNumber)}"/>
+
+    <!-- Category-->
+    <contextDataDef name="seriesCategoryName"       dataType="String"           defaultDataExpression="Series"/>
+    <contextDataDef name="seasonCategoryName"       dataType="String"           defaultDataExpression="Season"/>
+    <contextDataDef name="episodeCategoryName"      dataType="String"           defaultDataExpression="Episode"/>
+
+    <!-- General-->
+    <contextDataDef name="defaultContainsForced"    dataType="Boolean"          defaultDataExpression="${containsForcedList == 'all'}"/>
+    <contextDataDef name="additionalContainsForced" dataType="Boolean"          defaultDataExpression="${containsForcedList == 'all' or containsForcedList == 'notEnglish'}"/>
+    <contextDataDef name="addOnly"                  dataType="Boolean"          defaultDataExpression="false"/>
+    <contextDataDef name="defaultLanguage"          dataType="String"           defaultDataExpression="en_US"/>
+
+    <!--JSON-->
+    <contextDataDef name="jsonMetadata"             dataType="JSON">
+        <description>
+            Single JSON where:
+            Keys are metadata property names
+            Values are what to set the matching property to on this asset
+        </description>
+    </contextDataDef>
+
+    <contextDataDef name="seriesJsonMetadata"       dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    ${mpMetadataFieldNameSeries}: "${series}",
+                    ${mpMetadataFieldNameProvider}: "${provider}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+    <contextDataDef name="seasonJsonMetadata"       dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    ${mpMetadataFieldNameSeries}: "${series}",
+                    ${mpMetadataFieldNameSeason}: "${season}",
+                    ${mpMetadataFieldNameProvider}: "${provider}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+    <contextDataDef name="episodeJsonMetadata"      dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    ${mpMetadataFieldNameSeries}: "${series}",
+                    ${mpMetadataFieldNameSeason}: "${season}",
+                    ${mpMetadataFieldNameEpisodeNumber}: "${episodeNumber}",
+                    ${mpMetadataFieldNameProvider}: "${provider}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+    
+</workflow>

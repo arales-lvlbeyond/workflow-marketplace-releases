@@ -1,0 +1,159 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+          id="validateIngestedPackage"
+          name="Validate Ingested Package"
+          executionLabelExpression="Validating Package Ingested into Reach Engine..."
+          showInUserInterface="false"
+          subjectDOClassName=""
+          sdkVersion=""
+          devWorkflow="true"
+>
+    
+    <initialStepName>construct rql query</initialStepName>
+    
+    <groovyStep name="construct rql query"
+                devStep="true"
+                resultDataDef="rqlString"
+    >
+        <transition condition="${rqlString != null}">
+            <targetStepName>query for assets</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>clean up uploaded package</targetStepName>
+        </transition>
+        <script>
+            <![CDATA[
+                def rqlQuery = ""
+                
+                for (file in previouslyIngestedFiles) {
+                    if (file.name.toString().contains('.json')) {
+                        continue
+                    }
+                
+                    if (rqlQuery != "") {
+                        rqlQuery += " OR "
+                    }
+                
+                    rqlQuery += "name = '" + file.name + "'"
+                }
+                
+                return rqlQuery
+            ]]>
+        </script>
+    </groovyStep>
+    
+    <executeSubflowStep name="query for assets"
+                        targetWorkflowId="${rqlSubflowId}"
+                        executionLabelExpression="Querying for all assets to archive..."
+                        resultDataDef="assetMasters"
+                        pctCompleteExpression="10"
+                        nextStep="check if already ingested">
+        
+        <subflowContextDataMapping parentDataDef="rqlString" subflowDataDef="rqlString"/>
+    </executeSubflowStep>
+    
+    
+    
+    <noopStep name="check if already ingested"
+              executionLabelExpression="checking if uploaded files are already ingested..."
+    >
+        <transition condition="${assetMasters.size() == previouslyIngestedFiles.size()}">
+            <targetStepName>clean up uploaded package</targetStepName>
+        </transition>
+        <transition condition="${jsonData != null}">
+            <targetStepName>restore package</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>unable to synchronize package</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <deleteFileStep name="clean up uploaded package"
+                    sourceFilesExpression="${ingestedPackageDirectory}"
+                    executionLabelExpression="Cleaning up previously ingested package..."
+                    recurseSubfoldersExpression="true"
+                    nextStep="clean up json metadata" />
+    
+    <deleteFileStep name="clean up json metadata"
+                    sourceFilesExpression="${jsonData}"
+                    executionLabelExpression="Cleaning up previously ingested json metadata..."
+                    nextStep="end" />
+    
+    <runCommandStep name="restore package"
+                    executionLabelExpression="Restoring package..."
+                    executablePathExpression="/bin/mv"
+                    nextStep="restore json"
+    >
+        <arg>${previouslyIngestedPath}/${packageId}</arg>
+        <arg>${uploadsPath + packageId}</arg>
+    </runCommandStep>
+    
+    <runCommandStep
+        name="restore json"
+        executablePathExpression="/bin/mv"
+        devStep="true"
+        nextStep="synchronize package"
+    >
+        
+        <arg>${uploadsPath.replace('upload', 'ingested') + 'metadata/' + jsonData.name}</arg>
+        <arg>${uploadsPath + packageId + '/' + jsonData.name}</arg>
+    </runCommandStep>
+    
+    <executeSubflowStep name="synchronize package"
+                        executionLabelExpression="Ingesting remaining files from package not previously ingested..."
+                        targetWorkflowId="${synchronizeSubflowId}"
+                        nextStep="end"
+    >
+        <subflowContextDataMapping parentDataDef="uploadsPath"            subflowDataDef="uploadsPath"/>
+        <subflowContextDataMapping parentDataDef="previouslyIngestedPath" subflowDataDef="previouslyIngestedPath"/>
+        <subflowContextDataMapping parentDataDef="packageId"              subflowDataDef="packageId"/>
+    </executeSubflowStep>
+    
+    <!-- ................................................... End Steps .................................................... -->
+    <!-- success -->
+    <noopStep name="end"/>
+    
+    <noopStep name="unable to synchronize package"
+              executionLabelExpression="unable to synchronize package." />
+    
+    <!-- ................................................... Data Defs .................................................... -->
+    <!-- Input -->
+    <contextDataDef name="packageId"                dataType="String"     required="true" />
+    <contextDataDef name="uploadsPath"              dataType="String"     required="true" />
+    <contextDataDef name="previouslyIngestedPath"   dataType="String"     required="true" />
+    
+    <!-- Processing -->
+    <contextDataDef name="rqlString"                dataType="String" />
+    <contextDataDef name="assetMasters"             dataType="Data Object" multiple="true" />
+    
+    <contextDataDef name="ingestedDirectory"        dataType="Directory"   defaultDataExpression="${previouslyIngestedPath}" />
+    <contextDataDef name="ingestedPackageDirectory" dataType="Directory"   defaultDataExpression="${previouslyIngestedPath + '/' + packageId}" />
+    
+    <contextDataDef name="jsonPath"                 dataType="String"      defaultDataExpression="${previouslyIngestedPath + '/metadata/' + packageId}_metadata.json" />
+    <contextDataDef name="jsonData"                 dataType="File"        defaultDataExpression="${#fileExists(jsonPath) ? jsonPath : null}" />
+    
+    <contextDataDef name="previouslyIngestedFiles"  dataType="File"        multiple="true" defaultDataExpression="${#walkDir(previouslyIngestedPath + '/' + packageId, null)}" />
+    
+    <contextDataDef name="unfinishedIngest"         dataType="Boolean"     defaultDataExpression="true" />
+    
+    <contextDataDef name="rqlSubflowId"             dataType="String"      defaultDataExpression="getAssetsByRQL" />
+    <contextDataDef name="synchronizeSubflowId"     dataType="String"      defaultDataExpression="synchronizePackage" />
+</workflow>

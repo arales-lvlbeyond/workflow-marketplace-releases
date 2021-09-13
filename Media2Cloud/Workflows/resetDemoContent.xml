@@ -1,0 +1,102 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="resetDemoContent"
+          name="Reset Demo Content"
+          executionLabelExpression="Reset Demo Content - ${#formatDate('MM/dd/yy HH:mm:ss', #newDate())}"
+          description=""
+          adminOnly="true"
+          devWorkflow="true"
+          showInUserInterface="true"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion="">
+
+    <initialStepName>find timelines</initialStepName>
+
+    <queryStep
+            name="find timelines"
+            executionLabelExpression="Find timelines where Demo Temp = true.. Found ${timelines.size()}"
+            targetDataObjectClass="Timeline"
+            resultDataDef="timelines">
+        <transition condition="${timelines.size() > 0}">
+            <targetStepName>delete timelines</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>find assets</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="metadata.demoTemp" op="eq">
+                            <test value="${true}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+    
+    <executeSubflowStep
+            name="delete timelines"
+            targetWorkflowId="_deleteTimeline"
+            subjectChangePath="${timelines}"
+            nextStep="find assets"/>
+
+    <queryStep
+            name="find assets"
+            executionLabelExpression="Find assets where Demo Temp = true.. Found ${assetMasters.size()}"
+            targetDataObjectClass="AssetMaster"
+            resultDataDef="assetMasters">
+        <transition condition="${assetMasters.size() > 0}">
+            <targetStepName>delete asset</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="metadata.demoTemp" op="eq">
+                            <test value="${true}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <deleteAssetStep
+            name="delete asset"
+            executionLabelExpression="Delete ${assetMasters[counter].name}"
+            assetExpression="${assetMasters[counter]}"
+            deleteSourceFile="true"
+            nextStep="update counter"/>
+
+    <setContextData
+            name="update counter"
+            devStep="true"
+            targetDataDef="counter"
+            valueExpression="${counter + 1}">
+        <transition condition="${counter &lt; assetMasters.size()}">
+            <targetStepName>delete asset</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </setContextData>
+
+    <noopStep name="end"/>
+
+    <!-- Input -->
+
+
+    <!-- Internal -->
+    <contextDataDef name="timelines" dataType="Data Object" multiple="true"/>
+    <contextDataDef name="assetMasters" dataType="Data Object" multiple="true"/>
+    <contextDataDef name="counter" dataType="Integer" defaultDataExpression="0"/>
+    
+</workflow>

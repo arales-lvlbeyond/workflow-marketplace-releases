@@ -1,0 +1,120 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="
+    http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow-2.4.xsd
+    http://levelsbeyond.com/schema/workflow/nimbus
+    http://www.levelsbeyond.com/schema/production/nimbus-common-workflow-1.5.xsd
+    "
+	id="cleanExpiredLucidLinkExports"
+	name="Clean Expired Exports"
+	executionLabelExpression="Lucid Link - Clean Expired Exports - ${expiredLucidlinkExports.size()} expired asset${expiredLucidlinkExports.size() == 1 ? '' : 's'}."
+	group="Lucid Link"
+	adminOnly="true"
+	subjectDOClassName=""
+	showInUserInterface="true"
+	sdkVersion=""
+>
+
+	<initialStepName>is workflow executing</initialStepName>
+	
+	
+	<queryStep name="is workflow executing"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Check to see if this workflow is currently executing"
+	>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>get expired lucidlink exports</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+    
+    <executeSubflowStep name="get expired lucidlink exports"
+	    targetWorkflowId="getAssetsByRQL"
+	    resultDataDef="expiredLucidlinkExports">
+	    <transition condition="${expiredLucidlinkExports.size() > 0}">
+		    <targetStepName>remove expired exports</targetStepName>
+	    </transition>
+	    <transition condition="true">
+		    <targetStepName>no expired exports found</targetStepName>
+	    </transition>
+	    <subflowContextDataMapping parentDataDef="rqlSearch" subflowDataDef="rqlString"/>
+    </executeSubflowStep>
+	
+	<executeSubflowStep name="remove expired exports"
+		targetWorkflowId="expireLucidLink"
+		subflowExecutionLimitExpression="${subflowExecutionLimit}"
+		subjectChangePath="${expiredLucidlinkExports}"
+		nextStep="end"/>
+	
+	<noopStep name="no expired exports found"
+		nextStep="end"/>
+	
+    <!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing"
+		reasonExpression="Workflow already executing"
+	/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="currentExecutions" dataType="Data Object" multiple="true"/>
+	<contextDataDef name="targetDate" dataType="String" defaultDataExpression="${#formatDate('yyyy-MM-dd', #newDate())}" />
+	<contextDataDef name="expiredLucidlinkExports" dataType="Data Object" multiple="true" defaultDataExpression="${T(java.util.Collections).emptyList()}"/>
+	<contextDataDef name="rqlSearch" dataType="String">
+		<defaultDataExpression>lucidLinkExpiration lte '${targetDate}' OFFSET 0 SIZE ${rqlSearchResultLimit}</defaultDataExpression>
+	</contextDataDef>
+	<contextDataDef name="subflowExecutionLimit" dataType="Integer" defaultDataExpression="${#sysconfig('lucidLink.maxFileExecutions') ?: 10}"/>
+	<contextDataDef name="rqlSearchResultLimit" dataType="Integer" defaultDataExpression="${#sysconfig('lucidLink.maxCronExpiredAssetCount') ?: 100}"/>
+
+</workflow>

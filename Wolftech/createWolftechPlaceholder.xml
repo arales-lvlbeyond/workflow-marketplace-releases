@@ -1,0 +1,94 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2018 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow.xsd"
+	id="createWolftechPlaceholder"
+	name="Create Placeholder Asset, add Metadata, and Add to Collection for Wolftech"
+	executionLabelExpression="Creating Wolftech Asset: ${assetName}"
+	subjectDOClassName=""
+	resultDataDef="placeholderAsset"
+	sdkVersion="5.4"
+	showInUserInterface="false"
+	>
+	
+	<initialStepName>query for asset</initialStepName>
+	
+	
+	<queryStep
+		name="query for asset"
+		executionLabelExpression="Checking to see if asset exists with ID: ${wolftechID} >>> ${placeholderAsset != null}"
+		targetDataObjectClass="AssetMaster"
+		resultDataDef="placeholderAsset">
+		<transition condition="${placeholderAsset == null}">
+			<targetStepName>create placeholder</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>add asset to collection</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+					<criteria>
+					  <and>
+					      <condition property="metadata.wolftechID" op="eq">
+					          <test value="${wolftechID}" />
+					      </condition>
+					  </and>
+					</criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<createPlaceholderAssetStep
+		name="create placeholder"
+		assetName="${assetName}"
+		assetType="${assetType}"
+		resultDataDef="placeholderAsset"
+		nextStep="save metadata"
+		/>
+	
+	<saveDataObjectStep
+		name="save metadata"
+		dataObjectExpression="${placeholderAsset.metadata}"
+		nextStep="add asset to collection"
+		>
+		<property name="wolftechID">${wolftechID}</property>
+		<property name="wolftechStatus">${#picklistValue('wolftechStatus', "Placeholder")}</property>
+	</saveDataObjectStep>
+	
+	<executeSubflowStep
+		name="add asset to collection"
+		targetWorkflowId="_addAssetToCollection"
+		subjectChangePath="${placeholderAsset}"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="collection" subflowDataDef="collection"/>
+	</executeSubflowStep>
+	
+	<!--END-->
+	<noopStep name="end"/>
+	
+	
+	<!--CONTEXT DATA-->
+	<contextDataDef name="assetName"            dataType="String"   userInput="true"/>
+	<contextDataDef name="assetType"            dataType="String"   userInput="true"/>
+	<contextDataDef name="wolftechID"           dataType="String"   userInput="true"/>
+	<contextDataDef name="placeholderAsset"     dataType="Data Object"/>
+	<contextDataDef name="collection"           dataType="Data Object"/>
+	
+</workflow>

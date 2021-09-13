@@ -1,0 +1,238 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="runRemoteWorkflowAndMonitor"
+	name="Run Remote Workflow and Monitor"
+	executionLabelExpression="Run Remote Workflow and Monitor"
+	resultDataDef="workflowStatus"
+	deadlineExpression=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+>
+	
+	<initialStepName>start remote workflow</initialStepName>
+	
+	<!-- ............................................... Workflow Request Steps ................................................ -->
+	<submitHttpStep name="start remote workflow"
+		requestMethodExpression="POST"
+		urlExpression="${startWorkflowUrl}"
+		responseCodeDataDef="responseCode"
+		responseHeadersDataDef="responseHeaders"
+		responsePayloadDataDef="responsePayload"
+		executionLabelExpression="Start workflow (${remoteWorkflowId != null? remoteWorkflowId : 'null'}) at the remote reachengine (${remoteReachEngineAddress != null? remoteReachEngineAddress : 'null'})"
+		continueOnException="true"
+	>
+		<transition condition="${responseCode == 200 OR responseCode == 202}">
+			<targetStepName>wait for workflow to start</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to start workflow</targetStepName>
+		</transition>
+		
+		<requestPayloadItem name="body">${workflowRequestBody}</requestPayloadItem>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<delayStep name="wait for workflow to start"
+		delaySecondsExpression="2"
+		nextStep="get execution id from workflowGUID" />
+	
+	<submitHttpStep name="get execution id from workflowGUID"
+		requestMethodExpression="GET"
+		urlExpression="${remoteReachEngineAddress}/reachengine/api/workflows/executions/${responsePayload.workflowGuid}"
+		responseCodeDataDef="getResponseCode"
+		responsePayloadDataDef="getResponsePayload"
+		executionLabelExpression="Getting execution ID from workflowGUID: ${responsePayload.workflowGuid}"
+		continueOnException="true" >
+		<transition condition="${getResponseCode == 200 OR getResponseCode == 202}">
+			<targetStepName>initialize workflow status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to start workflow</targetStepName>
+		</transition>
+		<requestPayloadItem name="body">${workflowRequestBody}</requestPayloadItem>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<setContextData name="initialize workflow status"
+		targetDataDef="workflowStatus"
+		valueExpression="${responsePayload?.status}"
+		executionLabelExpression="workflow status of ${remoteWorkflowId} >>> ${getResponsePayload?.status != null? getResponsePayload?.status : 'null'}">
+		<transition condition="${isNotFinished.contains(workflowStatus)}">
+			<targetStepName>wait and check workflow status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<set targetDataDef="workflowCheckCount" valueExpression="0" />
+		<set targetDataDef="remoteWorkflowExecutionId" valueExpression="${getResponsePayload?.id}" />
+		<set targetDataDef="workflowStatus" valueExpression="${getResponsePayload?.status}"/>
+	</setContextData>
+	
+	<delayStep name="wait and check workflow status"
+		devStep="true"
+		delaySecondsExpression="${workflowPollIntervalSeconds}"
+		executionLabelExpression="Wait and check workflow status"
+		nextStep="check remote workflow status"/>
+	
+	<submitHttpStep name="check remote workflow status"
+		requestMethodExpression="GET"
+		urlExpression="${getWorkflowStatusUrl}/${remoteWorkflowExecutionId}"
+		responseCodeDataDef="responseCode"
+		responseHeadersDataDef="responseHeaders"
+		responsePayloadDataDef="responsePayload"
+		executionLabelExpression="Fetch remote workflow status (${remoteWorkflowId != null? remoteWorkflowId : 'null'}) at the remote reachengine (${remoteReachEngineAddress != null? remoteReachEngineAddress : 'null'})"
+		continueOnException="true">
+		<transition condition="${responseCode == 200}">
+			<targetStepName>update workflow status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed getting workflow status</targetStepName>
+		</transition>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<setContextData name="update workflow status"
+		targetDataDef="workflowStatus"
+		valueExpression="${responsePayload?.status}"
+		executionLabelExpression="workflow status of ${remoteWorkflowId} >>> ${responsePayload?.status != null? responsePayload?.status : 'null'}">
+		<transition condition="${workflowCheckCount &gt; workflowCheckCountMax}">
+			<targetStepName>workflow timeout error</targetStepName>
+		</transition>
+		<transition condition="${isNotFinished.contains(workflowStatus)}">
+			<targetStepName>wait and check workflow status</targetStepName>
+		</transition>
+		<transition condition="${returnContextData}">
+			<targetStepName>get remote workflow context data</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<set targetDataDef="workflowCheckCount" valueExpression="${workflowCheckCount + 1}" />
+		<set targetDataDef="workflowStatus" valueExpression="${responsePayload?.status}"/>
+	</setContextData>
+	
+	<submitHttpStep name="get remote workflow context data"
+		requestMethodExpression="GET"
+		urlExpression="${getWorkflowStatusUrl}/${remoteWorkflowExecutionId}/contextData"
+		responseCodeDataDef="responseCode"
+		responseHeadersDataDef="responseHeaders"
+		responsePayloadDataDef="responseContextDataPayload"
+		executionLabelExpression="Fetch remote workflow context data (${remoteWorkflowId != null? remoteWorkflowId : 'null'}) at the remote reachengine (${remoteReachEngineAddress != null? remoteReachEngineAddress : 'null'})"
+		continueOnException="true">
+		<transition condition="${responseCode == 200}">
+			<targetStepName>set combined json</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed getting workflow context data</targetStepName>
+		</transition>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<groovyStep name="set combined json"
+		executionLabelExpression="setting combined json..."
+		resultDataDef="combinedJson"
+		nextStep="set return value to json string"
+	>
+		<script>
+            <![CDATA[
+			def jsonData = responsePayload
+			
+			jsonData.put("contextData", responseContextDataPayload)
+			
+			return jsonData
+			]]>
+        </script>
+	</groovyStep>
+	
+	<setContextData name="set return value to json string"
+		targetDataDef="workflowStatus"
+		valueExpression="${combinedJson.toString()}"
+		nextStep="end"/>
+	
+	<!-- ...................................................... End Steps ...................................................... -->
+	<!-- success -->
+	<noopStep name="end" pctComplete="100"/>
+	
+	
+	<!-- start workflow request did not return code 200 -->
+	<failWorkflowStep name="failed to start workflow"
+		reasonExpression="failed to start workflow at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+		executionLabelExpression="failed to start workflow at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+	/>
+	
+	
+	<failWorkflowStep name="failed getting workflow status"
+		reasonExpression="failed to get workflow status at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+		executionLabelExpression="failed to get workflow status at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+	/>
+	
+	<failWorkflowStep name="failed getting workflow context data"
+		reasonExpression="failed to get workflow context data at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+		executionLabelExpression="failed to get workflow context data at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+	/>
+	
+	<setContextData name="workflow timeout error"
+		nextStep="workflow timeout failure">
+		<set targetDataDef="workflowStatus" valueExpression="WORKFLOW_TIMEOUT - ${workflowStatus}" />
+	</setContextData>
+	
+	<failWorkflowStep name="workflow timeout failure"
+		reasonExpression="failed to get workflow status at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+		executionLabelExpression="failed to get workflow status at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+	/>
+	<!-- .................................................. Context Data Defs .................................................. -->
+	<!-- .......... User Input / Passed In Variables .......... -->
+	<!-- remote reachengine to start the workflow at -->
+	<contextDataDef name="remoteReachEngineAddress" dataType="String"           userInput="true"    required="true" 	label="1. Remote ReachEngine Address:"/>
+	<!-- user to run the workflow as -->
+	<contextDataDef name="remoteUser"               dataType="String"           userInput="true"    required="true" 	label="2. Remote User:"/>
+	<!-- matching user's password -->
+	<contextDataDef name="remoteUserPassword"       dataType="String"           userInput="true"    required="true" 	label="3. Remote User Password:"/>
+	<!-- workflow to run -->
+	<contextDataDef name="remoteWorkflowId"         dataType="String"           userInput="true"    required="true" 	label="4. Remote Workflow ID:"/>
+	<!-- Workflow request body -->
+	<contextDataDef name="workflowRequestString"    dataType="String"           userInput="true"    					label="5. Workflow Request Body (JSON):"/>
+	<!-- return remote workflow context data -->
+	<contextDataDef name="returnContextData"        dataType="Boolean"          defaultDataExpression="false" />
+	
+	<!-- ................. Response Variables ................. -->
+	<!-- returned payload from a request -->
+	<contextDataDef name="responsePayload"          dataType="JSON" />
+	<contextDataDef name="getResponsePayload"       dataType="JSON" />
+	<contextDataDef name="responseContextDataPayload" dataType="JSON" />
+	<!-- returned code from a request -->
+	<contextDataDef name="responseCode"             dataType="Integer" />
+	<contextDataDef name="getResponseCode"          dataType="Integer" />
+	<!-- returned headers from a request -->
+	<contextDataDef name="responseHeaders"          dataType="NameValuePair"    multiple="true"/>
+	<!-- workflow status returned from the api -->
+	<contextDataDef name="workflowStatus" 			dataType="String"/>
+	<!-- workflow execution ID returned from the api -->
+	<contextDataDef name="remoteWorkflowExecutionId" dataType="String" />
+	<!-- ................ Processing Variables ................ -->
+	<!-- standard ReachEngine start workflow url using user inputs -->
+	<contextDataDef name="startWorkflowUrl"         dataType="String"           defaultDataExpression="${remoteReachEngineAddress}/reachengine/api/workflows/${remoteWorkflowId}/start"/>
+	<contextDataDef name="getWorkflowStatusUrl"     dataType="String"           defaultDataExpression="${remoteReachEngineAddress}/reachengine/api/workflows/executions" />
+	<contextDataDef name="workflowCheckCount"       dataType="Integer" />
+	<contextDataDef name="workflowPollIntervalSeconds" dataType="Integer" defaultDataExpression="30" />
+	<contextDataDef name="workflowCheckCountMax"       dataType="Integer" defaultDataExpression="240"/>
+	<!--
+		start workflow body (contextDataDef values).
+		JSON object set to user input.
+		If user input was not a valid json, this will not be set.
+	-->
+	<contextDataDef name="workflowRequestBody"      dataType="JSON"             defaultDataExpression="${workflowRequestString}"/>
+	<contextDataDef name="isNotFinished"            dataType="String"           multiple="true" defaultDataExpression="CREATED,QUEUED,EXECUTING,WAITING,PAUSED" />
+	
+	<contextDataDef name="combinedJson" dataType="JSON" />
+</workflow>

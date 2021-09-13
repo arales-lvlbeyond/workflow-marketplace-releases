@@ -1,0 +1,275 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+		id="requestViaMediaShuttle"
+		name="Request Assets via MediaShuttle"
+		executionLabelExpression="Request Assets via MediaShuttle"
+		subjectDOClassName=""
+		showInUserInterface="true"
+		subjectQualifierExpression="${subject == null}"
+		sdkVersion=""
+		hasDownload="false"
+>
+
+	<initialStepName>normalize metadata</initialStepName>
+	
+
+	<executeSubflowStep name="normalize metadata"
+			executionLabelExpression="Normalize metadata"
+			targetWorkflowId="ingestNormalizeMetadata"
+			resultDataDef="metadataFormJson"
+			nextStep="create empty package"
+	>
+		<subflowContextDataMapping parentDataDef="metadataForm" subflowDataDef="metadataForm"/>
+		<subflowContextDataMapping parentDataDef="collections" subflowDataDef="collections"/>
+	</executeSubflowStep>
+	
+	<!-- CREATE AN EMPTY FILE PACKAGE -->
+	<executeSubflowStep name="create empty package"
+			targetWorkflowId="createEmptyMediaShuttlePackage"
+			executionLabelExpression="Creating Empty Media Shuttle Package"
+			resultDataDef="portalAndPackage"
+			nextStep="set portal and package ids"
+			>
+		<subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+		<subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+	</executeSubflowStep>
+	
+	<setContextData name="set portal and package ids"
+			executionLabelExpression="Portal ID: ${portalId}, Package ID: ${packageId}"
+			devStep="true"
+			nextStep="get storage type"
+			>
+		<set targetDataDef="portalId" valueExpression="${portalAndPackage.get('portalId').asText()}"/>
+		<set targetDataDef="packageId" valueExpression="${portalAndPackage.get('packageId').asText()}"/>
+	</setContextData>
+	
+	<!-- GET STORAGE INFO -->
+	<executeSubflowStep name="get storage type"
+			targetWorkflowId="getStorageType"
+			executionLabelExpression="Get storage type"
+			resultDataDef="storageType"
+	>
+		<subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+		<subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+		<subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+		
+		<transition condition="${storageType.get('type').asText() == 's3'}">
+			<targetStepName>set s3 bucket and prefix</targetStepName>
+		</transition>
+		<transition condition="${storageType.get('type').asText() == 'local'}">
+			<targetStepName>get portal storage repo</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>error storage type</targetStepName>
+		</transition>
+	</executeSubflowStep>
+	
+	
+	<submitHttpStep name="get portal storage repo"
+			urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/storage"
+			requestMethodExpression="GET"
+			responseCodeDataDef="getStorageResponseCode"
+			responsePayloadDataDef="getStorageResponse"
+			executionLabelExpression="Requesting Storage for Portal: ${portalId}"
+	>
+		<transition condition="${getStorageResponseCode.startsWith('2')}">
+			<targetStepName>set storage repo path</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to retrieve storage</targetStepName>
+		</transition>
+		
+		<requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+	</submitHttpStep>
+	
+	
+	<!-- SET CONTEXT DATA -->
+	<setContextData name="set storage repo path"
+			executionLabelExpression="Set storage repo path"
+			targetDataDef="repositoryPath"
+			valueExpression="${getStorageResponse.get('repositoryPath').asText()}"
+			nextStep="set destination path" />
+	
+	
+	<setContextData name="set s3 bucket and prefix"
+			executionLabelExpression="Set S3 bucket and prefix"
+			devStep="true"
+			nextStep="set destination path"
+	>
+		<set targetDataDef="s3Bucket" valueExpression="${storageType.get('configuration').get('bucket').asText()}" />
+		<set targetDataDef="s3Prefix" valueExpression="${storageType.get('configuration').get('filePrefix').asText()}" />
+	</setContextData>
+	
+	
+	<setContextData name="set destination path"
+			executionLabelExpression="Set destinationPath"
+			targetDataDef="destinationPath"
+			valueExpression="${importPath}/${packageId}"
+			devStep="true"
+			nextStep="create metadata file" />
+	
+	
+	<!-- CREATE METADATA FILE -->
+	<executeSubflowStep name="create metadata file"
+		targetWorkflowId="exportMetadataAsJson"
+		executionLabelExpression="Create metadata JSON file"
+		resultDataDef="exportFile"
+		>
+		<subflowContextDataMapping parentDataDef="packageId" subflowDataDef="packageId"/>
+		<subflowContextDataMapping parentDataDef="metadataFormJson" subflowDataDef="metadataFormJson"/>
+		<subflowContextDataMapping parentDataDef="repositoryPath" subflowDataDef="repositoryPath"/>
+		<subflowContextDataMapping parentDataDef="importPath" subflowDataDef="importPath"/>
+		
+		<transition condition="${s3Bucket != null AND exportFile.file.exists()}">
+			<targetStepName>copy json to s3</targetStepName>
+		</transition>
+		<transition condition="${exportFile.file.exists()}">
+			<targetStepName>create local directory</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>export error</targetStepName>
+		</transition>
+	</executeSubflowStep>
+	
+	
+	<!-- CREATE DESTINATION FOLDER AND COPY METADATA JSON FILE -->
+	<!--	Copy to S3  -->
+	
+	<runCommandStep name="copy json to s3"
+		executablePathExpression="${awsExePath}"
+		executionLabelExpression="Copy JSON to: s3://${s3Bucket}/${s3Prefix}${packageId}/"
+		nextStep="delete temp json"
+		>
+		<arg>s3</arg>
+		<arg>cp</arg>
+		<arg>${exportFile}</arg>
+		<arg>s3://${s3Bucket}/${s3Prefix}${packageId}/</arg>
+	</runCommandStep>
+	
+	<!--	Copy to Local   -->
+	<runCommandStep name="create local directory"
+		executablePathExpression="/bin/mkdir"
+		nextStep="copy json to local"
+		>
+		<arg>-p</arg>
+		<arg>${repositoryPath}/${destinationPath}</arg>
+	</runCommandStep>
+	
+	<runCommandStep name="copy json to local"
+		executionLabelExpression="Copy JSON to: ${repositoryPath}/${destinationPath}"
+		executablePathExpression="/bin/cp"
+		nextStep="delete temp json"
+		>
+		<arg>${exportFile}</arg>
+		<arg>${repositoryPath}/${destinationPath}</arg>
+	</runCommandStep>
+	
+	<!--	Delete temporary json file-->
+	<deleteFileStep name="delete temp json"
+		executionLabelExpression="Delete temporary JSON file"
+		sourceFilesExpression="${exportFile}"
+		nextStep="create transfer token" />
+	
+	<!-- CREATE AN UPLOAD TOKEN -->
+	<executeSubflowStep name="create transfer token"
+		executionLabelExpression="Create package transfer token for package id ${packageId}"
+		targetWorkflowId="createPackageTransferToken"
+		subjectChangePath="${emailAddresses}"
+		subflowTargetDataDef="userEmail"
+		resultDataDef="transferLink"
+		nextStep="end"
+		pctComplete="85"
+	>
+		<subflowContextDataMapping parentDataDef="portalId" subflowDataDef="portalId"/>
+		<subflowContextDataMapping parentDataDef="packageId" subflowDataDef="packageId"/>
+		<subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+		<subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+		<subflowContextDataMapping parentDataDef="expirationDate" subflowDataDef="expirationDate"/>
+		<subflowContextDataMapping parentDataDef="grantToken" subflowDataDef="grantToken"/>
+		<subflowContextDataMapping parentDataDef="destinationPath" subflowDataDef="destinationPath"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<failWorkflowStep name="export error"
+			reasonExpression="Unable to create the metadata file"
+			executionLabelExpression="Unable to create the metadata file"
+	/>
+	
+	<failWorkflowStep name="error storage type"
+			reasonExpression="Storage type: ${storageType}"
+			executionLabelExpression="Could not determine storage type"
+	/>
+	
+	<failWorkflowStep name="failed to retrieve storage"
+			executionLabelExpression="Failed to add content, received code ${getStorageResponseCode}"
+			reasonExpression="Response: ${getStorageResponse.asText()}"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="expirationDate"       label="Expiration Date"      dataType="Date/Time"    userInput="true"    required="true" displayIndex="1"/>
+	<contextDataDef name="emailAddresses" label="Recipient Emails" dataType="Email" userInput="true" required="true" multiple="true" displayIndex="2"/>
+	<contextDataDef name="collections"              dataType="Data Object"      userInput="true"    label="Collections"      multiple="true" displayIndex="3">
+		<picklist>
+			<dataObjectSearch dataObjectClass="AssetCollection">
+				<searchPath>name</searchPath>
+			</dataObjectSearch>
+		</picklist>
+	</contextDataDef>
+	
+	<contextDataDef name="metadataForm" label="Metadata Form" dataType="MetadataForm" userInput="true" required="false" displayIndex="4" />
+	
+	<!-- ......... METADATA ........... -->
+	<contextDataDef name="metadataFormType" dataType="String" defaultDataExpression="access">
+		<description>
+			TEMPORARY!!! (Forms will be standardized to the same format in the future)
+			Valid types = "access" or "panel"
+		</description>
+	</contextDataDef>
+	<contextDataDef name="metadataFormJson" dataType="JSON" />
+	<contextDataDef name="exportFile" dataType="File" />
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="portalId" dataType="String" />
+	<contextDataDef name="packageId" dataType="String"/>
+	<contextDataDef dataType="JSON" name="storageType" />
+	<contextDataDef name="portalAndPackage" dataType="JSON"/>
+	<contextDataDef name="transferLink" dataType="String"/>
+	<contextDataDef name="grantToken" dataType="String" defaultDataExpression="upload"/>
+	<contextDataDef dataType="String" name="destinationPath" />
+	<contextDataDef dataType="String" name="s3Bucket" />
+	<contextDataDef dataType="String" name="s3Prefix" />
+	<contextDataDef name="getStorageResponseCode"           dataType="String"/>
+	<contextDataDef name="getStorageResponse"               dataType="JSON"/>
+	
+	
+	<!-- ......... DEFAULTS ........... -->
+	<contextDataDef name="repositoryPath" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.repository.path') ?: '/reachengine/media'}" />
+	<contextDataDef name="importPath" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.import.path') ?: 'import'}" />
+	
+	<contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+	<contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+	<contextDataDef name="awsExePath"                   dataType="String"           defaultDataExpression="${ #sysconfig('workflows.awsExePath') ?: '/usr/bin/aws' }" />
+
+</workflow>

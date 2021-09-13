@@ -1,0 +1,85 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	id="createPlaceholderAsset"
+	name="Create Placeholder Asset"
+	executionLabelExpression="Create Placeholder Asset - ${assetName}${sourceSystem != null ? ( ' - Sourced From: ' + sourceSystem ) : ''}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="RE Transfer"
+	adminOnly="true"
+	sdkVersion="">
+
+	<initialStepName>create placeholder</initialStepName>
+	
+	<createPlaceholderAssetStep
+		name="create placeholder"
+		assetName="${assetName}"
+		assetType="${assetType.toLowerCase()}"
+		resultDataDef="placeholder"
+	>
+		<transition condition="${sourceSystem != null}">
+			<targetStepName>mark with source system</targetStepName>
+		</transition>
+		<transition condition="${jsonMetadata != null}">
+			<targetStepName>save metadata</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</createPlaceholderAssetStep>
+	
+	<saveDataObjectStep name="mark with source system"
+		dataObjectExpression="${placeholder.metadata}"
+		devStep="true"
+	>
+		<transition condition="${jsonMetadata != null}">
+			<targetStepName>save metadata</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		
+		<!-- @TODO: configure as a single picklist instead of text -->
+		<property name="sentFromRESystem">${sourceSystem}</property>
+	</saveDataObjectStep>
+	
+	<executeSubflowStep name="save metadata"
+		targetWorkflowId="_saveAnyAssetMetadata"
+		subjectChangePath="${placeholder}"
+		subflowTargetDataDef="asset"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata" />
+	</executeSubflowStep>
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="assetType"                            dataType="String" />
+	<contextDataDef name="assetName"                            dataType="String" />
+	<contextDataDef name="sourceSystem"                         dataType="String" />
+	<contextDataDef name="jsonMetadata"                         dataType="JSON" />
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="placeholder"                          dataType="Data Object" />
+	
+	
+    
+</workflow>

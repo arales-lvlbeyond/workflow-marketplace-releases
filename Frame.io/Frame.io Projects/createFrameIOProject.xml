@@ -1,0 +1,101 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="createFrameIOProject"
+	name="Create Frame.io Project"
+	executionLabelExpression="Create Frame.io Project"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	resultDataDef="frameioProjectResponseJson"
+>
+	
+	<initialStepName>Construct RootAssetID</initialStepName>
+	
+	<groovyStep name="Construct RootAssetID"
+		devStep="true"
+		resultDataDef="rootAssetId"
+		nextStep="Get account ID">
+		<script>
+            <![CDATA[
+			StringBuilder sb = new StringBuilder(team);
+			sb.insert(20, '-');
+			sb.insert(16, '-');
+			sb.insert(12, '-');
+			sb.insert(8, '-');
+			return sb.toString()
+			]]>
+        </script>
+	</groovyStep>
+	
+	<!--	Get account ID  -->
+	<executeSubflowStep name="Get account ID"
+		targetWorkflowId="getAccountId"
+		resultDataDef="accountId"
+		nextStep="Get or create project"
+		>
+		<subflowContextDataMapping parentDataDef="frameioURL" subflowDataDef="frameioURL"/>
+		<subflowContextDataMapping parentDataDef="frameBearer" subflowDataDef="frameBearer"/>
+		<subflowContextDataMapping parentDataDef="rootAssetId" subflowDataDef="team_id"/>
+	</executeSubflowStep>
+	
+	<!--    Check if project exists or create a new one + Retrieve project id    -->
+	<executeSubflowStep name="Get or create project"
+		targetWorkflowId="getOrCreateProject"
+		resultDataDef="frameioProjectResponseJson"
+		subjectChangePath="${accountId}"
+		subflowTargetDataDef="accountId"
+		nextStep="project collection created"
+		>
+		<subflowContextDataMapping parentDataDef="frameioURL" subflowDataDef="frameioURL"/>
+		<subflowContextDataMapping parentDataDef="frameBearer" subflowDataDef="frameBearer"/>
+		<subflowContextDataMapping parentDataDef="rootAssetId" subflowDataDef="rootAssetId"/>
+		<subflowContextDataMapping parentDataDef="projectName" subflowDataDef="projectName"/>
+		<subflowContextDataMapping parentDataDef="isPrivate" subflowDataDef="isPrivate"/>
+	</executeSubflowStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<createSuccessNotificationStep name="project collection created" notificationTypeExpression="success" notificationBodyExpression="Project collection ${projectName} has successfully been created" />
+	
+	<noopStep name="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="team" label="Frame.io Team" dataType="String" userInput="true" required="true">
+		<picklist>
+			<metadataProperty>frameioTeam</metadataProperty>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="projectName" dataType="String" label="Project Name" userInput="true" required="true" defaultDataExpression="${collection.name}"/>
+	<contextDataDef name="isPrivate" dataType="Boolean" label="Private" userInput="true" defaultDataExpression="false"/>
+	<contextDataDef name="collection" dataType="Data Object"/>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="frameioURL"               dataType="String"       defaultDataExpression="https://api.frame.io/v2"/>
+	<contextDataDef name="frameBearer"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"   hidden="true"/>
+	<contextDataDef name="rootAssetId" dataType="String"/>
+	<contextDataDef name="frameioProjectResponseJson" dataType="JSON"/>
+	<contextDataDef name="accountId" dataType="String"/>
+
+</workflow>

@@ -1,0 +1,139 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+xmlns="http://levelsbeyond.com/schema/workflow"
+xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+id="restoreCollectionFromGlacier"
+name="Restore Collection from Glacier"
+executionLabelExpression="Restoring collection {collection.name} from Glacier..."
+description=""
+subjectDOClassName="AssetCollection"
+resultDataDef=""
+deadlineExpression=""
+showInUserInterface="true"
+sdkVersion="5.21">
+
+<initialStepName>check for collection contents</initialStepName>
+
+<noopStep name="check for collection contents"
+    executionLabelExpression="check for collection contents"
+    devStep="true">
+    <transition condition="${collectionItems.size() &gt; 0}">
+        <targetStepName>query for running subflows</targetStepName>
+    </transition>
+    <transition condition="${true}">
+        <targetStepName>no items in collection</targetStepName>
+    </transition>
+</noopStep>
+
+<!--queue loop-->
+<queryStep
+    name="query for running subflows"
+    targetDataObjectClass="WorkflowExecution"
+    resultDataDef="executingSubflows"
+    executionLabelExpression="checking for workflows (with id = ${restoreSubflow} that are not in a finished state"
+    devStep="true">
+    <transition condition="${executingSubflows == null or executingSubflows.size() &lt; queueLimit}">
+        <targetStepName>ready next items</targetStepName>
+    </transition>
+    <transition condition="${ true }">
+        <targetStepName>queue full</targetStepName>
+    </transition>
+
+    <criteria>
+        <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${restoreSubflow}"/>
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+    </criteria>
+</queryStep>
+
+
+<delayStep
+    name="queue full"
+    delaySecondsExpression="${queuePollInterval}"
+    executionLabelExpression="${executingSubflows.size()}/${queueLimit} running subflows (id = ${restoreSubflow}). Waiting ${queuePollInterval} seconds. ${collectionItems.size()} remaining items."
+    nextStep="query for running subflows"
+    devStep="true"/>
+
+
+<setContextData
+    name="ready next items"
+    targetDataDef="nextCollectionItems"
+    valueExpression="${collectionItems.size() &gt; batchSize ? collectionItems.subList(0, batchSize) : collectionItems.subList(0, collectionItems.size()) }"
+    executionLabelExpression="got ${nextCollectionItems.size()} items to process"
+    nextStep="remove next items from main list"
+    devStep="true"/>
+
+
+<groovyStep
+    name="remove next items from main list"
+    resultDataDef="collectionItems"
+    executionLabelExpression="remove ${nextCollectionItems.size()} items from the main list"
+    nextStep="restore collection items"
+    devStep="true">
+    <script>
+            <![CDATA[
+        def success = collectionItems.removeAll(nextCollectionItems)
+        if (success) {
+            return collectionItems
+        } else {
+            return null
+        }
+        ]]>
+        </script>
+</groovyStep>
+
+
+<executeSubflowStep name="restore collection items"
+    targetWorkflowId="${restoreSubflow}"
+    subjectChangePath="${nextCollectionItems}"
+    pctComplete="98">
+    <transition condition="${collectionItems.size() &gt; 0}">
+        <targetStepName>query for running subflows</targetStepName>
+    </transition>
+    <transition condition="${true}">
+        <targetStepName>end</targetStepName>
+    </transition>
+    <subflowContextDataMapping parentDataDef="retrievalMode"    subflowDataDef="retrievalMode"/>
+</executeSubflowStep>
+
+<noopStep name="end" pctComplete="100"/>
+
+
+<!--..........fail steps....................-->
+<failWorkflowStep name="no items in collection"
+    reasonExpression="There were no assets found in this collection."
+    executionLabelExpression="There were no assets found in this collection."/>
+
+<!-- .................................................. Context Data Defs .................................................. -->
+    <contextDataDef name="retrievalMode"        dataType="String"       userInput="true"    label="Glacier Retrieval Tier"      defaultDataExpression="Bulk">
+        <picklist>
+            <picklistItem value="Bulk"/>
+            <picklistItem value="Standard"/>
+            <picklistItem value="Expedited"/>
+        </picklist>
+    </contextDataDef>
+    
+<contextDataDef name="collection"           dataType="Data Object"      defaultDataExpression="${subject}"/>
+<contextDataDef name="collectionItems"      dataType="Data Object"      multiple="true" defaultDataExpression="${collection?.assetItems?.![asset]}"/>
+<contextDataDef name="nextCollectionItems"  dataType="Data Object"      multiple="true"/>
+<contextDataDef name="executingSubflows"    dataType="Data Object"      multiple="true"/>
+<contextDataDef name="queuePollInterval"    dataType="Integer"          defaultDataExpression="${#sysconfig('workflows.archiveCollectionToGlacier.queuePollInterval') ?: 5}"/>
+<contextDataDef name="queueLimit"           dataType="Integer"          defaultDataExpression="${#sysconfig('workflows.archiveCollectionToGlacier.queueLimit') ?: 11}"/>
+<contextDataDef name="batchSize"            dataType="Integer"          defaultDataExpression="${#sysconfig('workflows.archiveCollectionToGlacier.batchSize') ?: 10}"/>
+<contextDataDef name="restoreSubflow"       dataType="String"           defaultDataExpression="restoreAssetFromGlacier"/>
+
+
+</workflow>

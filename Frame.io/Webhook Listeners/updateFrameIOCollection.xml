@@ -1,0 +1,106 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="updateFrameIOCollection"
+	name="Update Frame.io Collection"
+	executionLabelExpression="Update Frame.io Collection"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	hasDownload="false"
+>
+	
+	<initialStepName>get collection</initialStepName>
+	
+	
+	<!-- ................................................... Get asset .................................................... -->
+	<queryStep name="get collection"
+		executionLabelExpression="Check for existing asset with Frame.io ID: ${projectId}"
+		targetDataObjectClass="AssetCollection"
+		resultDataDef="collection"
+	>
+		<transition condition="${collection != null}">
+			<targetStepName>update asset metadata</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>no collection found</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="metadata.frameioProjectID" op="eq">
+                            <test value="${projectId}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<!-- ................................................... Update asset .................................................... -->
+	<executeSubflowStep name="update asset metadata"
+		targetWorkflowId="_saveAnyAssetMetadata"
+		executionLabelExpression="Update collection metadata"
+		subjectChangePath="${collection}"
+		subflowTargetDataDef="asset"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<!-- failure -->
+	<noopStep name="no collection found" nextStep="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="projectId" dataType="String"/>
+	<contextDataDef name="resourceId" dataType="String"/>
+	<contextDataDef name="resourceType" dataType="String"/>
+	<contextDataDef name="teamId" dataType="String"/>
+	<contextDataDef name="type" dataType="String"/>
+	<contextDataDef name="userId" dataType="String"/>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="collection" dataType="Data Object"/>
+	<contextDataDef name="frameioStatusFieldName" dataType="String" defaultDataExpression="${#sysconfig('workflow.field.names.frameioStatus') ?: 'frameioStatus'}"/>
+	<contextDataDef name="jsonMetadata" dataType="JSON">
+		<defaultDataExpression>
+			<![CDATA[
+			{
+				${frameioStatusFieldName} : "",
+				frameIOParentID : "",
+				frameioID : "",
+				frameioProjectID : "",
+				frameioTeam : "",
+				frameioURL : ""
+			}
+			]]>
+		</defaultDataExpression>
+	</contextDataDef>
+	
+</workflow>

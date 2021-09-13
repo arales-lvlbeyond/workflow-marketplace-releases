@@ -1,0 +1,161 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2018 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="
+    http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow-2.4.xsd
+    http://levelsbeyond.com/schema/workflow/nimbus
+    http://www.levelsbeyond.com/schema/production/nimbus-common-workflow-1.5.xsd
+    "
+    id="archiveAssetToGlacier"
+    name="Archive Asset To Glacier"
+    executionLabelExpression="Archive ${asset.name} to Glacier"
+    description=""
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${!originalContent.truncatedFlag OR originalContent.restoreKey == null OR originalContent.restoreKey == '' OR originalContent.file.exists()}"
+    sdkVersion=""
+    >
+    
+    <initialStepName>check for file to archive</initialStepName>
+    
+    <noopStep name="check for file to archive">
+        <transition condition="${#fileExists(uploadFilePath)}">
+            <targetStepName>deliver to s3</targetStepName>
+        </transition>
+        <transition condition="${!#fileExists(uploadFilePath)}">
+            <targetStepName>check if exists in glacier</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to read file system</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <runCommandStep
+        name="check if exists in glacier"
+        executionLabelExpression="Checking if asset is in Glacier..."
+        executablePathExpression="/reachengine/cmds/run_aws.sh"
+        stdoutDataDef="lsResult"
+        stderrDataDef="error"
+        stallOnErrorResultCode="false"
+        >
+        <transition condition="${lsResult != null and lsResult.contains(uploadFileName) and lsResult.substring(lsResult.lastIndexOf('  ') + 2, lsResult.lastIndexOf(' ')).equals(uploadFileSize)}">
+            <targetStepName>update asset content restore key</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>no source file to archive</targetStepName>
+        </transition>
+        <arg>s3</arg>
+        <arg>ls</arg>
+        <arg>${destPath}</arg>
+    </runCommandStep>
+    
+    <runCommandStep
+        name="deliver to s3"
+        executionLabelExpression="Sending File to ${s3Bucket}"
+        executablePathExpression="/reachengine/cmds/run_aws.sh"
+        pctComplete="80"
+        stdoutDataDef="stdout_aws"
+        stderrDataDef="stderr_aws"
+        continueOnException="false"
+        nextStep="update asset content restore key"
+        >
+        <arg>s3</arg>
+        <arg>cp</arg>
+        <arg>${fileToUpload}</arg>
+        <arg>${destPath}</arg>
+        <arg>--storage-class</arg>
+        <arg>DEEP_ARCHIVE</arg>
+    </runCommandStep>
+    
+    <!-- updates the asset restore key -->
+    
+    <saveDataObjectStep
+        name="update asset content restore key"
+        executionLabelExpression="update db record for file restore path"
+        targetDataObjectClass="AssetContent"
+        pctComplete="90"
+        dataObjectExpression="${uploadContent}"
+        nextStep="remove source file"
+        >
+        <property name="restoreKey">${destPath}</property>
+    </saveDataObjectStep>
+    
+    <!-- ........................................... Delete the Source File .......................................... -->
+    <deleteFileStep
+        name="remove source file"
+        executionLabelExpression="Deleting the file from the Reach Engine repo at: ${uploadFilePath}"
+        sourceFilesExpression="${fileToUpload}"
+        nextStep="update asset content truncated flag"
+        />
+    
+    
+    <!-- updates the asset if it needs to be archived -->
+    <saveDataObjectStep
+        name="update asset content truncated flag"
+        executionLabelExpression="Mark asset content ${subject.id} as archived with a truncated flag of: ${subject.sourceContent.truncatedFlag}"
+        targetDataObjectClass="AssetContent"
+        pctComplete="90"
+        dataObjectExpression="${uploadContent}"
+        nextStep="Reindex"
+        >
+        <property name="truncatedFlag">true</property>
+    </saveDataObjectStep>
+    
+    <raiseWorkflowEventStep
+        name="Reindex"
+        eventTypeExpression="ensureIndexed"
+        executionLabelExpression="Ensure Asset Indexed"
+        nextStep="end"
+        >
+        <property name="indexTargetRef">${subject}</property>
+    </raiseWorkflowEventStep>
+    
+    <noopStep name="end"/>
+    
+    <!-- graceful fail end steps -->
+    <noopStep name="failed to read file system"
+              executionLabelExpression="ERROR: Failed to read file system!" />
+    
+    <noopStep name="no source file to archive"
+              executionLabelExpression="Unable to archive asset as source content is missing and is not backed up." />
+    
+    
+    <!--Context Data Defs-->
+    <contextDataDef name="asset"            dataType="Data Object" defaultDataExpression="${subject}" />
+    
+    <contextDataDef name="uploadFilePath"   dataType="String"       defaultDataExpression="${subject.sourceContent.file.absolutePath}"/>
+    <contextDataDef name="uploadFileName"   dataType="String"       defaultDataExpression="${subject.sourceContent.file.name}"/>
+    <contextDataDef name="fileToUpload"     dataType="File"         defaultDataExpression="${subject.sourceContent.file}"/>
+    
+    <contextDataDef name="uploadContent"    dataType="Data Object"  defaultDataExpression="${subject.sourceContent}"/>
+    <contextDataDef name="mezzContent"      dataType="Data Object"/>
+    
+    <contextDataDef name="isVideo" 		    dataType="Boolean"      defaultDataExpression="${subject.assetType.equals('Video')}"/>
+    
+    <contextDataDef name="isModified"       dataType="Boolean"      defaultDataExpression="false" />
+    
+    <contextDataDef name="s3Bucket"         dataType="String"       defaultDataExpression="${#sysconfig('workflows.archiveAssetToGlacier.s3bucket') ?: 'dpre-wfd'}" />
+    <contextDataDef name="lsResult"         dataType="String" />
+    <contextDataDef  name="error"           dataType="String" />
+    
+    <contextDataDef name="destPath"         dataType="String"       defaultDataExpression="s3://${s3Bucket}${uploadFilePath}" />
+    <contextDataDef name="stdout_aws"       dataType="String"       hidden="true"/>
+    <contextDataDef name="stderr_aws"       dataType="String" />
+    <contextDataDef name="uploadFileSize"   dataType="String"       defaultDataExpression="${uploadContent.fileSize}" />
+    
+</workflow>

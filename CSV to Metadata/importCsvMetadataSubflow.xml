@@ -1,0 +1,76 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="
+    http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow-2.3.xsd
+    http://levelsbeyond.com/schema/workflow/nimbus http://www.levelsbeyond.com/schema/production/nimbus-common-workflow-1.5.xsd
+    "
+	id="importCsvMetadataSubflow"
+	name="Import csv metadata"
+	executionLabelExpression="Processing ${inputID}"
+	description=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+>
+	
+	<initialStepName>check for existing asset</initialStepName>
+	
+	<queryStep name="check for existing asset"
+		targetDataObjectClass="AssetMaster"
+		executionLabelExpression="checking for ${inputID}"
+		resultDataDef="assetMaster">
+		<transition condition="${assetMaster != null}">
+			<targetStepName>save asset metadata</targetStepName>
+		</transition>
+		<transition condition="=true">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+               <criteria>
+                 <and>
+                   <condition property="id" op="eq">
+                     <test value="${inputID}" />
+                   </condition>
+                 </and>
+              </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<saveDataObjectStep name="save asset metadata"
+		dataObjectExpression="${assetMaster.metadata}"
+		nameValuePairsDataDef="metadata"
+		jsonValuesDataDef="input"
+	>
+		<transition condition="${assetMaster.name != assetName}">
+			<targetStepName>save new asset name</targetStepName>
+		</transition>
+		<transition condition="=true">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</saveDataObjectStep>
+	
+	<saveDataObjectStep name="save new asset name"
+		targetDataObjectClass="AssetMaster"
+		dataObjectExpression="${assetMaster}"
+		nextStep="end">
+		<property name="name">${assetName}</property>
+	</saveDataObjectStep>
+	
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"    pctComplete="100"/>
+	
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	
+	<contextDataDef name="input" dataType="JSON"/>
+	<contextDataDef name="inputID" dataType="String" defaultDataExpression="${input.get('assetId').asText()}"/>
+	<contextDataDef name="assetName" dataType="String"  defaultDataExpression="${input.get('name').asText()}" />
+	<contextDataDef name="assetMaster" dataType="Data Object" />
+	<contextDataDef name="metadata" dataType="NameValuePair" multiple="true"/>
+</workflow>

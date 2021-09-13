@@ -1,0 +1,134 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="frameIOWebhookListener"
+	name="Frame.io Webhook Listener"
+	executionLabelExpression="Frame.io Webhook Listener"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	hasDownload="false"
+	devWorkflow="true"
+>
+	
+	<initialStepName>check action type</initialStepName>
+	
+	<!-- ................................................... Initial Checks .................................................... -->
+	<noopStep name="check action type"
+		executionLabelExpression="Type: ${type}"
+		devStep="true"
+	>
+		<transition condition="${type.contains('label.updated')}">
+			<targetStepName>update asset status</targetStepName>
+		</transition>
+		<transition condition="${type.contains('asset.reachengine.approved')}">
+			<targetStepName>update asset status</targetStepName>
+		</transition>
+		<transition condition="${type.contains('deleted')}">
+			<targetStepName>check resource type</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Type not supported</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<noopStep name="check resource type"
+		executionLabelExpression="Resource: ${resourceId} | Type: ${resourceType}"
+		devStep="true"
+	>
+		<transition condition="${resourceType == 'asset'}">
+			<targetStepName>update asset</targetStepName>
+		</transition>
+		<transition condition="${resourceType == 'project'}">
+			<targetStepName>update collection</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Resource not supported</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<!--	Exceptions  -->
+	<noopStep name="Resource not supported" nextStep="end"/>
+	<noopStep name="Type not supported" nextStep="end"/>
+	
+	<!-- ................................................... Subflows .................................................... -->
+	<executeSubflowStep name="update asset status"
+		targetWorkflowId="updateFrameIOAssetStatus"
+		executionLabelExpression="Update Asset Status"
+		nextStep="end"
+		>
+		<subflowContextDataMapping parentDataDef="projectId" subflowDataDef="projectId"/>
+		<subflowContextDataMapping parentDataDef="resourceId" subflowDataDef="resourceId"/>
+		<subflowContextDataMapping parentDataDef="resourceType" subflowDataDef="resourceType"/>
+		<subflowContextDataMapping parentDataDef="teamId" subflowDataDef="teamId"/>
+		<subflowContextDataMapping parentDataDef="type" subflowDataDef="type"/>
+		<subflowContextDataMapping parentDataDef="userId" subflowDataDef="userId"/>
+	</executeSubflowStep>
+	
+	<executeSubflowStep name="update collection"
+		targetWorkflowId="updateFrameIOCollection"
+		executionLabelExpression="Update Collection"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="resourceId" subflowDataDef="projectId"/>
+		<subflowContextDataMapping parentDataDef="resourceType" subflowDataDef="resourceType"/>
+		<subflowContextDataMapping parentDataDef="teamId" subflowDataDef="teamId"/>
+		<subflowContextDataMapping parentDataDef="type" subflowDataDef="type"/>
+		<subflowContextDataMapping parentDataDef="userId" subflowDataDef="userId"/>
+	</executeSubflowStep>
+	
+	<executeSubflowStep name="update asset"
+		targetWorkflowId="updateFrameIOAsset"
+		executionLabelExpression="Update Asset"
+		nextStep="end"
+	>
+		<subflowContextDataMapping parentDataDef="projectId" subflowDataDef="projectId"/>
+		<subflowContextDataMapping parentDataDef="resourceId" subflowDataDef="resourceId"/>
+		<subflowContextDataMapping parentDataDef="resourceType" subflowDataDef="resourceType"/>
+		<subflowContextDataMapping parentDataDef="teamId" subflowDataDef="teamId"/>
+		<subflowContextDataMapping parentDataDef="type" subflowDataDef="type"/>
+		<subflowContextDataMapping parentDataDef="userId" subflowDataDef="userId"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="project" dataType="JSON"/>
+	<contextDataDef name="projectId" dataType="String" defaultDataExpression="${project.id.toString()}"/>
+	
+	<contextDataDef name="resource" dataType="JSON"/>
+	<contextDataDef name="resourceId" dataType="String" defaultDataExpression="${resource.id.toString()}"/>
+	<contextDataDef name="resourceType" dataType="String" defaultDataExpression="${resource.type.toString()}"/>
+	
+	<contextDataDef name="team" dataType="JSON"/>
+	<contextDataDef name="teamId" dataType="String" defaultDataExpression="${team.id.toString()}"/>
+	
+	<contextDataDef name="type" dataType="String"/>
+	
+	<contextDataDef name="user" dataType="JSON"/>
+	<contextDataDef name="userId" dataType="String" defaultDataExpression="${user.id.toString()}"/>
+	
+</workflow>

@@ -1,0 +1,154 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="startRemoteWorkflow"
+	name="Start Remote Workflow"
+	executionLabelExpression="Start Remote Workflow"
+	resultDataDef="workflowStatus"
+	deadlineExpression=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+>
+	
+	<initialStepName>check for start or run</initialStepName>
+	
+	
+	<noopStep name="check for start or run"
+		executionLabelExpression="${startOrRun} remote workflow"
+	>
+		<transition condition="${startOrRun.toLowerCase().equals('start')}">
+			<targetStepName>start remote workflow</targetStepName>
+		</transition>
+		<transition condition="${startOrRun.toLowerCase().equals('run')}">
+			<targetStepName>run remote workflow</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>unknown endpoint</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<!-- ............................................... Workflow Request Steps ................................................ -->
+	<!-- separate steps for start and run into 2 steps for queuing purposes -->
+	<submitHttpStep name="start remote workflow"
+		requestMethodExpression="POST"
+		urlExpression="${startWorkflowUrl}"
+		responseCodeDataDef="responseCode"
+		responseHeadersDataDef="responseHeaders"
+		responsePayloadDataDef="responsePayload"
+		executionLabelExpression="Start workflow (${remoteWorkflowId != null? remoteWorkflowId : 'null'}) at the remote reachengine (${remoteReachEngineAddress != null? remoteReachEngineAddress : 'null'})"
+		continueOnException="true"
+	>
+		<transition condition="${responseCode == 200}">
+			<targetStepName>get workflow status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to start workflow</targetStepName>
+		</transition>
+		
+		<requestPayloadItem name="body">${workflowRequestBody}</requestPayloadItem>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	
+	<!-- separate steps for start and run into 2 steps for queuing purposes -->
+	<submitHttpStep name="run remote workflow"
+		requestMethodExpression="POST"
+		urlExpression="${startWorkflowUrl}"
+		responseCodeDataDef="responseCode"
+		responseHeadersDataDef="responseHeaders"
+		responsePayloadDataDef="responsePayload"
+		executionLabelExpression="Start workflow (${remoteWorkflowId != null? remoteWorkflowId : 'null'}) at the remote reachengine (${remoteReachEngineAddress != null? remoteReachEngineAddress : 'null'})"
+		continueOnException="true"
+	>
+		<transition condition="${responseCode == 200}">
+			<targetStepName>get workflow status</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to start workflow</targetStepName>
+		</transition>
+		
+		<requestPayloadItem name="body">${workflowRequestBody}</requestPayloadItem>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="auth_user">${remoteUser}</requestHeader>
+		<requestHeader name="auth_password">${remoteUserPassword}</requestHeader>
+	</submitHttpStep>
+	
+	
+	<setContextData name="get workflow status"
+		targetDataDef="workflowStatus"
+		valueExpression="${responsePayload?.status}"
+		executionLabelExpression="workflow status of ${remoteWorkflowId} >>> ${responsePayload?.status != null? responsePayload?.status : 'null'}"
+		nextStep="end"
+	/>
+	
+	
+	<!-- ...................................................... End Steps ...................................................... -->
+	<!-- success -->
+	<noopStep name="end" pctComplete="100"/>
+	
+	
+	<!-- start workflow request did not return code 200 -->
+	<failWorkflowStep name="failed to start workflow"
+		reasonExpression="failed to start workflow at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+		executionLabelExpression="failed to start workflow at ${remoteReachEngineAddress} (Response Code: ${responseCode != null? responseCode : 'null'}). Find StartWorkflow request debugging in RE log."
+	/>
+	
+	
+	<!-- start or run was not passed in -->
+	<failWorkflowStep name="unknown endpoint"
+		reasonExpression="start or run is required, but ${startOrRun} was supplied."
+		executionLabelExpression="start or run is required, but ${startOrRun} was supplied."
+	/>
+	
+	
+	<!-- .................................................. Context Data Defs .................................................. -->
+	<!-- .......... User Input / Passed In Variables .......... -->
+	<!-- remote reachengine to start the workflow at -->
+	<contextDataDef name="remoteReachEngineAddress" dataType="String"           userInput="true"    required="true" 	label="1. Remote ReachEngine Address:"/>
+	<!-- user to run the workflow as -->
+	<contextDataDef name="remoteUser"               dataType="String"           userInput="true"    required="true" 	label="2. Remote User:"/>
+	<!-- matching user's password -->
+	<contextDataDef name="remoteUserPassword"       dataType="String"           userInput="true"    required="true" 	label="3. Remote User Password:"/>
+	<!-- workflow to run -->
+	<contextDataDef name="remoteWorkflowId"         dataType="String"           userInput="true"    required="true" 	label="4. Remote Workflow ID:"/>
+	<!-- use the start api or the run api? -->
+	<contextDataDef name="startOrRun" 				dataType="String"			userInput="true"	required="true"		label="5. Start Or Run Workflow?">
+		<picklist>
+			<picklistItem value="start"/>
+			<picklistItem value="run"/>
+		</picklist>
+	</contextDataDef>
+	<!--
+		contextDataDefs to set to specific values. JSON format (same as API)
+			{
+				"dataDef1" : "myValue1",
+				"dataDef2" : "myValue2"
+			}
+	-->
+	<contextDataDef name="workflowRequestString"    dataType="String"           userInput="true"    					label="6. Workflow Request Body (JSON):"/>
+	
+	<!-- ................. Response Variables ................. -->
+	<!-- returned payload from a request -->
+	<contextDataDef name="responsePayload"          dataType="JSON" />
+	<!-- returned code from a request -->
+	<contextDataDef name="responseCode"             dataType="Integer" />
+	<!-- returned headers from a request -->
+	<contextDataDef name="responseHeaders"          dataType="String"           multiple="true"/>
+	<!-- workflow status returned from the api -->
+	<contextDataDef name="workflowStatus" 			dataType="String"/>
+	
+	<!-- ................ Processing Variables ................ -->
+	<!-- standard ReachEngine start workflow url using user inputs -->
+	<contextDataDef name="startWorkflowUrl"         dataType="String"           defaultDataExpression="${remoteReachEngineAddress}/reachengine/api/workflows/${remoteWorkflowId}/${startOrRun}"/>
+	<!--
+		start workflow body (contextDataDef values).
+		JSON object set to user input.
+		If user input was not a valid json, this will not be set.
+	-->
+	<contextDataDef name="workflowRequestBody"      dataType="JSON"             defaultDataExpression="${workflowRequestString}"/>
+
+</workflow>

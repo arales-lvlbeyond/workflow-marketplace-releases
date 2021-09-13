@@ -1,0 +1,208 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="mpAuthorizeWorkflow"
+	name="Authorize Marketplace Workflow"
+	executionLabelExpression="Authorizing Workflow's License against Payhip"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+	devWorkflow="true"
+>
+
+	<initialStepName>check payhip apikey</initialStepName>
+
+	<groovyStep name="check payhip apikey"
+				resultDataDef="payhipApiKeyString"
+				devStep="true"
+				nextStep="query license server"
+	>
+		<script>
+			<![CDATA[
+			import org.apache.commons.codec.binary.Base64
+
+			byte[] decodedBytes = Base64.decodeBase64(payhipApiKey)
+			def key = new String(decodedBytes)
+			return key
+			]]>
+		</script>
+	</groovyStep>
+
+	<runCommandStep name="query license server"
+					executionLabelExpression="Query Payhip license key server"
+					executablePathExpression="${curlExecutablePath}"
+					stdoutDataDef="queryResponsePayload"
+					stderrDataDef="queryResponseErr"
+					resultCodeDataDef="queryResponseCode"
+					continueOnException="true"
+	>
+		<!-- curl error, most likely bad internet connection or url link -->
+		<transition condition="${queryResponseCode != 0}">
+			<targetStepName>curl issue</targetStepName>
+		</transition>
+		<!-- response object is null -->
+		<transition condition="${queryResponsePayload == null OR queryResponsePayload.isNull()}">
+			<targetStepName>curl issue</targetStepName>
+		</transition>
+		<!-- Payhip api returned call the as unsuccessful - Payhip API Key issue -  -->
+		<!--  {"code":"authentication_fail","message":"failed to authenticate","success":false} -->
+		<transition condition="${queryResponsePayload.has('success') AND !queryResponsePayload.get('success').asBoolean()}">
+			<targetStepName>api failure</targetStepName>
+		</transition>
+		<!-- invalid workflow license or workflow product link value-->
+		<transition condition="${queryResponsePayload.has('data') AND queryResponsePayload.data.size() == 0}">
+			<targetStepName>license issue</targetStepName>
+		</transition>
+		<!-- workflow license is enabled and valid-->
+		<transition condition="${queryResponsePayload.has('data') AND queryResponsePayload.data.get('enabled').asBoolean()}">
+			<targetStepName>workflow authorized</targetStepName>
+		</transition>
+		<!-- workflow license is disabled and need to prohibit execution -->
+		<transition condition="${queryResponsePayload.has('data') AND !queryResponsePayload.data.get('enabled').asBoolean()}">
+			<targetStepName>workflow license disabled</targetStepName>
+		</transition>
+		<!-- unknown issue -->
+		<transition condition="${true}">
+			<targetStepName>unknown issue</targetStepName>
+		</transition>
+		<arg>-s</arg>
+		<arg>-X</arg>
+		<arg>GET</arg>
+		<arg>-H</arg>
+		<arg>payhip-api-key:${payhipApiKeyString}</arg>
+		<arg>${payhipUrl}</arg>
+	</runCommandStep>
+
+	<!--...........................................  Success ....................................................... -->
+
+	<noopStep name="workflow authorized"
+			  executionLabelExpression="Workflow license authorized"
+			  nextStep="end"
+	/>
+
+	<!-- ........................................ Validation issues ................................................ -->
+
+	<!-- workflow payhip license is disabled -->
+	<setContextData name="workflow license disabled"
+					executionLabelExpression="Workflow license is disabled"
+					nextStep="get customer email">
+
+		<set targetDataDef="workflowAuthIssue" 	valueExpression="Workflow license is disabled."/>
+
+	</setContextData>
+
+	<!-- An issue occurred during the curl command to validate payhip license, probably a connection or payhip site issue of some sort -->
+	<setContextData name="curl issue"
+					executionLabelExpression="Issue with curl while validating workflow license"
+					nextStep="get customer email">
+
+		<set targetDataDef="workflowAuthIssue" 	valueExpression="License could not be verified most likely due to a curl command or response issue.  Most likely caused by a connection issue.  May will resolve itself."/>
+	</setContextData>
+
+	<!-- An issue occurred authenticating to payhip, verify payhip api key value is correct-->
+	<setContextData name="api failure"
+					executionLabelExpression="Issue authenticating to payhip"
+					nextStep="get customer email">
+
+		<set targetDataDef="workflowAuthIssue" 	valueExpression="License could not be verified most likely due to an invalid Payhip API Key." />
+	</setContextData>
+
+	<!-- There is an is issue with either the workflow's product link or license key.  Check if key values are entered incorrectly in dyn properties -->
+	<setContextData name="license issue"
+					executionLabelExpression="Issue with either the workflow's product link or license key"
+					nextStep="get customer email">
+
+		<set targetDataDef="workflowAuthIssue"  valueExpression="License could not be verified most likely due to an issue with an invalid payhip workflow license key or product key.Check the value entered for the dynamic properties to see if values are entered correctly." />
+	</setContextData>
+
+	<!-- An unknown issue occurred while validating license, logged issue to status UI but let WF run  -->
+	<setContextData name="unknown issue"
+					executionLabelExpression="Issue with either the workflow's product link or license key"
+					nextStep="get customer email">
+
+		<set targetDataDef="workflowAuthIssue"	valueExpression="The marketplace ${workflowToAuthorize} workflow license could not be verified due to an unknown cause."
+		/>
+	</setContextData>
+
+
+	<setContextData name="get customer email"
+					nextStep="send email">
+
+		<set targetDataDef="customerBuyerEmail" valueExpression="${queryResponsePayload?.data?.get('buyer_email') != null ? queryResponsePayload?.data?.get('buyer_email').asText() : 'Not available'}"/>
+
+	</setContextData>
+
+	<!-- Send an email with issue to Marketplace Distribution email  -->
+	<emailStep name="send email"
+			   emailAddressesExpression="${emailAddress}"
+			   subjectExpression="MarketPlace License Validation Issue for license ${payhipWorkflowLicenseKey}"
+			   nextStep="end"
+	>
+		<body>
+			<![CDATA[
+                Hello,
+                The following issue was encountered when validating the Marketplace Workflow:
+
+				Customer Buyer Email: ${customerBuyerEmail}
+				Customer Reach URL:  ${reachUrl}
+				Payhip License Key:  ${payhipWorkflowLicenseKey}
+				Payhip Product Link: ${payhipWorkflowProductLink}
+
+				Issue:
+				${workflowAuthIssue}
+
+				Please investigate if issue continues.
+
+				Thank you,
+				Reach Engine MP Payhip Authorization Workflow
+
+            ]]>
+		</body>
+	</emailStep>
+
+	<!-- ................................................... End Steps ............................................. -->
+
+	<noopStep name="end"/>
+
+
+	<!-- ................................................... Data Defs ............................................. -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="payhipUrl" dataType="String" defaultDataExpression="https://payhip.com/api/v1/license/verify?product_link=${payhipWorkflowProductLink}&amp;license_key=${payhipWorkflowLicenseKey}" />
+
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="queryResponseCode" 				dataType="Integer"/>
+	<contextDataDef name="queryResponseCode" 				dataType="Integer"/>
+	<contextDataDef name="queryResponseErr" 				dataType="String"/>
+	<contextDataDef name="queryResponsePayload" 			dataType="JSON"/>
+	<contextDataDef name="curlExecutablePath"				dataType="String" 	defaultDataExpression="${#sysconfig('system.curlExecutablePath') ?: '/usr/bin/curl'}" />
+
+	<!-- ......... Payhip ............... -->
+	<contextDataDef name="payhipApiKey" 					dataType="String" 	defaultDataExpression="${#sysconfig('marketplace.payhip.apiKey') ?: 'Y2JlMDE3ZmViZDYzMjAwMjUyZGIwMTIwNjlmZWI2NmJmYWVlMmY2YQ=='}" hidden="true"/>
+	<contextDataDef name="payhipApiKeyString" 				dataType="String" 	hidden="true" />
+	<contextDataDef name="workflowLicensePropertyName" 		dataType="String"/>
+	<contextDataDef name="workflowProductPropertyName" 		dataType="String"/>
+	<contextDataDef name="payhipWorkflowLicenseKey" 		dataType="String" 	defaultDataExpression="${#sysconfig(workflowLicensePropertyName)}" />
+	<contextDataDef name="payhipWorkflowProductLink" 		dataType="String" 	defaultDataExpression="${#sysconfig(workflowProductPropertyName)}" />
+	<contextDataDef name="workflowAuthIssue"				dataType="String"/>
+	<contextDataDef name="workflowId" 						dataType="String"  	defaultDataExpression="" />
+	<contextDataDef name="emailAddress" 					dataType="String" 	defaultDataExpression="workflowmarketplace@reachengine.com"/>
+	<contextDataDef name="reachUrl" 						dataType="String"  	defaultDataExpression="${#sysconfig('access.hostname')} (See sender's email domain if customer info is not configured within the Reach URL.)" />
+	<contextDataDef name="customerBuyerEmail" 				dataType="String"	/>
+</workflow>

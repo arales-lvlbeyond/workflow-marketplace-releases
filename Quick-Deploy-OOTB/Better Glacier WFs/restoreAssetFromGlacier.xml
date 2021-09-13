@@ -1,0 +1,168 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2018 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="restoreAssetFromGlacier"
+    name="Restore Asset from Glacier"
+    description="Restore an Asset's contents from AWS Glacier to S3 RRS"
+    executionLabelExpression="Restore Asset from Glacier | Asset: ${subject.name} | Retrieval: ${retrievalMode}"
+    showInUserInterface="true"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${sourceContent.truncatedFlag}"
+    sdkVersion=""
+    resultDataDef="assetMaster"
+    >
+
+    <initialStepName>check for file</initialStepName>
+    
+    <noopStep name="check for file">
+        <transition condition="${#fileExists(assetPath)}">
+            <targetStepName>set truncated flag to false</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>set request restore status begin</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <saveDataObjectStep
+        name="set request restore status begin"
+        executionLabelExpression="Setting Restore Status to 'Restore Requested'"
+        dataObjectExpression="${subject.metadata}"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        nextStep="restore source file"
+        >
+        <property name="restoreStatus">${#picklistValue('restoreStatus', 'Restore Requested')}</property>
+    </saveDataObjectStep>
+    
+    <executeSubflowStep
+        name="restore source file"
+        targetWorkflowId="glacierObjectRestore"
+        subjectChangePath="${subject}"
+        resultDataDef="restoreSuccess"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        >
+        <transition condition="${restoreSuccess}">
+            <targetStepName>restore from s3</targetStepName>
+        </transition>
+        <transition condition="${!failOnError}">
+            <targetStepName>restore fail end</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>restore request failed</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="failOnError"      subflowDataDef="failOnError"/>
+        <subflowContextDataMapping parentDataDef="retrievalMode"    subflowDataDef="retrievalMode"/>
+    </executeSubflowStep>
+    
+    <runCommandStep
+        name="restore from s3"
+        executionLabelExpression="Restoring file from ${s3Bucket}"
+        executablePathExpression="/reachengine/cmds/run_aws.sh"
+        pctComplete="80"
+        nextStep="set truncated flag to false"
+        >
+        <arg>s3</arg>
+        <arg>cp</arg>
+        <arg>${restoreKey}</arg>
+        <arg>${assetPath}</arg>
+    </runCommandStep>
+    
+    <!--Upon successful retrieval Restore Status will be "complete" and Content Status will be "ready for delivery"-->
+    
+    <saveDataObjectStep
+        name="set truncated flag to false"
+        executionLabelExpression="Setting truncated flag to false"
+        dataObjectExpression="${subject.sourceContent}"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        nextStep="Reindex"
+        >
+        <property name="truncatedFlag">false</property>
+    </saveDataObjectStep>
+    
+    <raiseWorkflowEventStep
+        name="Reindex"
+        eventTypeExpression="ensureIndexed"
+        executionLabelExpression="Ensure Asset Indexed"
+        nextStep="set request restore status complete"
+        >
+        <property name="indexTargetRef">${subject}</property>
+    </raiseWorkflowEventStep>
+    
+    <saveDataObjectStep
+        name="set request restore status complete"
+        executionLabelExpression="Setting Restore Status to 'Restore Requested'"
+        dataObjectExpression="${subject.metadata}"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        nextStep="end"
+        >
+        <property name="restoreStatus">${#picklistValue('restoreStatus', 'Complete')}</property>
+    </saveDataObjectStep>
+    
+    <!-- END STATES-->
+    <setContextData
+        name="end"
+        executionLabelExpression="end: asset available"
+        targetDataDef="assetMaster"
+        valueExpression="${subject}"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        />
+    
+    
+    <noopStep
+        name="restore fail end"
+        executionLabelExpression="end: restore request failed"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+        />
+    
+    
+    <failWorkflowStep
+        name="restore request failed"
+        reasonExpression="restore request failed for asset: ${subject.name}"
+        executionLabelExpression="restore request failed for asset: ${subject.name}"
+        />
+
+    
+    <!-- .......................................Context Data Defs............................................. -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="retrievalMode"        dataType="String"       userInput="true"    label="Glacier Retrieval Tier"      defaultDataExpression="Bulk">
+        <picklist>
+            <picklistItem value="Bulk"/>
+            <picklistItem value="Standard"/>
+            <picklistItem value="Expedited"/>
+        </picklist>
+    </contextDataDef>
+    <contextDataDef name="failOnError"          dataType="Boolean"      defaultDataExpression="true"/>
+    <contextDataDef name="createThumb"          dataType="Boolean"      defaultDataExpression="true"/>
+    <contextDataDef name="createProxy"          dataType="Boolean"      defaultDataExpression="true"/>
+    
+    <!-- ............ RESULT ............ -->
+    <contextDataDef name="assetMaster"          dataType="Data Object"/>
+    
+    <!-- .......... PROCESSING .......... -->
+    <contextDataDef name="restoreSuccess"       dataType="Boolean"      defaultDataExpression="false"/>
+    <contextDataDef name="proxiesSubflow"       dataType="String"       defaultDataExpression="${#sysconfig('workflows.default.ingestAsset.proxiesWorkflow') ?: '_createProxiesAnyAsset'}"/>
+    <contextDataDef name="wfExe"                dataType="Data Object"  defaultDataExpression="${#this}"/>
+    
+    <contextDataDef name="restoreKey"           dataType="String"       defaultDataExpression="${subject.sourceContent.restoreKey}"/>
+    <contextDataDef name="assetPath"            dataType="String"       defaultDataExpression="${subject.sourceContent.file.absolutePath}"/>
+    
+    <contextDataDef name="isVideo" 		        dataType="Boolean"      defaultDataExpression="${subject.assetType.equals('Video')}"/>
+
+
+</workflow>

@@ -1,0 +1,140 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/latest https://s3-us-west-2.amazonaws.com/schema.levelsbeyond.com/2.3.16.17962/studio.xsd"
+		id="createTimeline"
+		name="Create Timeline"
+		executionLabelExpression="Create Timeline | ${subject.name}"
+		subjectDOClassName="VideoAssetMaster"
+		showInUserInterface="true"
+		resultDataDef="timeline"
+		sdkVersion=""
+>
+	
+	<initialStepName>check create timeline</initialStepName>
+
+	<!--
+		Using a boolean `createTimeline` (default: true) if this workflow is called from a parent workflow (e.g.: asset ingest),
+		and we want to give the user an option to turn this on or off
+	-->
+	<noopStep name="check create timeline"
+			executionLabelExpression="Create timeline? ${createTimeline}"
+			devStep="true"
+	>
+		<transition condition="${createTimeline == 'true' AND #mediaType(asset).toLowerCase() == 'video'}">
+			<targetStepName>get asset metadata</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<!-- ...................................................  Extract metadata, category and collections from video asset master  ...................................................... -->
+	<groovyStep name="get asset metadata"
+			executionLabelExpression="Extracting metadata from the asset"
+			resultDataDef="jsonMetadata"
+			nextStep="get asset categories"
+	>
+		<script>
+			<![CDATA[
+			import com.routeto1.spring.ApplicationContextHolder
+			import com.levelsbeyond.service.inventory.MetadataService
+			
+			MetadataService metadataService = ApplicationContextHolder.getApplicationContext().getBean(MetadataService.class)
+			
+			return metadataService.toMetadataSetDTO(asset.getMetadata()).getMetadata()
+		]]>
+		</script>
+	</groovyStep>
+	
+	<setContextData
+			name="get asset categories"
+			targetDataDef="categoryNames"
+			valueExpression="${asset.metadata?.categoryNames}"
+			devStep="true"
+			nextStep="get collections"
+	/>
+	
+	<setContextData
+			name="get collections"
+			executionLabelExpression="Get asset collections"
+			targetDataDef="collections"
+			valueExpression="${asset.collectionMemberships.![collection]}"
+			nextStep="create timeline"
+	/>
+	
+	<!-- ...................................................  Create Timeline  ...................................................... -->
+	<nimbus:createTimelineStep
+			name="create timeline"
+			executionLabelExpression="Create Timeline - &quot;${asset.name}&quot;"
+			nameExpression="${asset.name}"
+			formatExpression="SMPTE"
+			framerateExpression="${asset.mezzanine.frameRate}"
+			dropFrameExpression="${asset.mezzanine.dropFrameFlag}"
+			startTimecodeExpression="${asset.mezzanine.startTimecode}"
+			resultDataDef="timeline"
+			nextStep="delay"/>
+	
+	<delayStep name="delay"
+			devStep="true"
+			delaySecondsExpression="5"
+			nextStep="add asset to timeline"/>
+	
+	<nimbus:addAssetToTimelineStep name="add asset to timeline"
+			executionLabelExpression="Add video asset to Timeline"
+			targetAssetExpression="${asset}"
+			targetTimelineExpression="${timeline}"
+			nextStep="save categories to timeline" />
+	
+	<nimbus:changeMetaCategoryStep name="save categories to timeline"
+			targetObjectExpression="${timeline}"
+			executionLabelExpression="Save categories on Timeline from dataDef &quot;categoryNames&quot;"
+			nextStep="save metadata to timeline"
+	>
+		<nimbus:addCategory>${categoryNames}</nimbus:addCategory>
+	</nimbus:changeMetaCategoryStep>
+	
+	<executeSubflowStep name="save metadata to timeline"
+			executionLabelExpression="Save asset metadata to Timeline"
+			targetWorkflowId="_saveAnyAssetMetadata"
+			subjectChangePath="${timeline}"
+			subflowTargetDataDef="asset"
+			nextStep="end">
+		<subflowContextDataMapping parentDataDef="collections" subflowDataDef="collections" />
+		<subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata" />
+	</executeSubflowStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="createTimeline"           dataType="String"   defaultDataExpression="true" />
+	<contextDataDef name="asset"                    dataType="Data Object"  defaultDataExpression="${subject}"/>
+	<contextDataDef name="timeline"                 dataType="Data Object" />
+	<contextDataDef name="categories" 		        dataType="String"	    multiple="true"/>
+	<contextDataDef name="collections" 		        dataType="Data Object"	    multiple="true"/>
+	<contextDataDef name="categoryNames"            dataType="String"    multiple="true" />
+	<contextDataDef name="jsonMetadata"             dataType="JSON"/>
+	
+</workflow>

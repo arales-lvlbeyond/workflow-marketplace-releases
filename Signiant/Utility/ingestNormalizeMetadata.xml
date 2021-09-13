@@ -1,0 +1,148 @@
+<workflow xmlns="http://levelsbeyond.com/schema/workflow"
+        id="ingestNormalizeMetadata"
+        name="ingestNormalizeMetadata"
+        subjectDOClassName=""
+        sdkVersion=""
+        resultDataDef="metadataFormJson"
+        showInUserInterface="false">
+    <initialStepName>normalize metadata</initialStepName>
+    
+    
+    <groovyStep name="normalize metadata"
+            resultDataDef="metadataFormJson"
+            nextStep="fin"
+    >
+        <script>
+		<![CDATA[
+            import groovy.json.*
+            import org.slf4j.Logger
+            import org.slf4j.LoggerFactory
+            
+            Logger log = LoggerFactory.getLogger("com.levelsbeyond.plugin.workflow");
+            
+            try{
+                Map allDataJson = [:]
+                allDataJson.put("metadata", [:])
+                allDataJson.put("links", [])
+                allDataJson.put("categories", [])
+                allDataJson.put("collections", [])
+                
+                // form extraction
+                if(metadataForm != null && metadataForm.toString() != "null" && metadataForm.toString() != "{}"){
+                    Map formData = new JsonSlurper().parseText(metadataForm.toString())
+                    
+                    if(metadataFormType == "access"){
+                        allDataJson.put("source", "access")
+                        for(category in formData.metadataCategories){
+                            allDataJson.categories.push("[AssetCategory." + category.id + "]")
+                        }
+                        
+                        for(collection in formData.collections){
+                            allDataJson.collections.push("[AssetCollection." + collection.id + "]")
+                        }
+                        
+                        formData.remove("metadataCategories")
+                        formData.remove("collections")
+                        formData.remove("metadataFormId")
+                        
+                        formData.each{ key, value ->
+                            allDataJson.metadata.put(key, value)
+                        }
+                    }
+                    else if (metadataFormType == "panel"){
+                        allDataJson.put("source", formData.source)
+                        for(category in formData.categories){
+                            allDataJson.categories.push("[AssetCategory." + category.replaceAll('"','') + "]")
+                        }
+                        for(collection in formData.collections){
+                            allDataJson.collections.push("[AssetCollection." + collection.replaceAll('"','') + "]")
+                        }
+                        
+                        formData.metadata.each{ key, value ->
+                            allDataJson.metadata.put(key, value)
+                        }
+                    }
+                    else{
+                        log.warn("metadataFormType (${metadataFormType}) is invalid. Skipping form data...")
+                    }
+                }
+                
+                // separate links
+                Set linkKeys = []
+                allDataJson.metadata.each{ key, value ->
+                    if(value instanceof Map){
+                        if(value.title != null && value.url != null){
+                            Map linkMap = [propertyName: key, linkInfo: value]
+                            metadataFormJson.links.push(linkMap)
+                            linkKeys.add(key)
+                        }
+                    }
+                }
+                for (key in linkKeys){
+                    allDataJson.metadata.remove(key)
+                }
+                
+                // combine form and non-form data
+                Map customMetadata = new JsonSlurper().parseText(jsonMetadata.toString())
+                customMetadata.each{ key, value ->
+                    allDataJson.metadata.put(key, value)
+                }
+                for(linkMap in linkMetadata){
+                    allDataJson.links.push(new JsonSlurper().parseText(linkMap.toString()))
+                }
+                for(category in categories){
+                    allDataJson.categories.push(category.toString())
+                }
+                for(collection in collections){
+                    allDataJson.collections.push(collection.toString())
+                }
+                
+                // return everything combined
+                return allDataJson
+            }
+            catch(Exception e){
+                log.error("combining metadata error >>> ${e}")
+                return new JsonSlurper().parseText('{"error":"could not combine data"}')
+            }
+            ]]>
+		</script>
+    </groovyStep>
+    
+    <noopStep name="fin" />
+    
+    <contextDataDef name="metadataFormJson" dataType="JSON" />
+    <contextDataDef name="failOnError"          dataType="Boolean"          defaultDataExpression="${#sysconfig('workflows.default.metadata.failOnError') ?: true}"/>
+    <contextDataDef name="categories" 		    dataType="Data Object"	    multiple="true"/>
+    <contextDataDef name="categoryNames"        dataType="String"           multiple="true"/>
+    <contextDataDef name="collections" 		    dataType="Data Object"	    multiple="true"/>
+    <contextDataDef name="metadataForm"         dataType="MetadataForm"/>
+    <contextDataDef name="jsonMetadata"         dataType="JSON">
+        <description>
+            Single JSON where:
+            Keys are metadata property names
+            Values are what to set the matching property to on this asset
+        </description>
+    </contextDataDef>
+    <contextDataDef name="linkMetadata"         dataType="JSON"             multiple="true">
+        <description>
+            Array of JSONs where:
+            Each JSON has 2 Keys (propertyName and linkInfo):
+            propertyName's value is a metadata property name of type link
+            linkInfo's value is a JSON with 2 keys (title and url):
+            title's value is the display name for the link
+            url's value is the url to open when the title is clicked on
+        </description>
+    </contextDataDef>
+    <contextDataDef name="metadataFormType"     dataType="String"           defaultDataExpression="${metadataForm?.source == 'prelude' or metadataForm?.source == 'premiere' ? 'panel' : 'access'}" >
+        <description>
+            TEMPORARY!!! (Forms will be standardized to the same format in the future)
+            Valid types = "access" or "panel"
+        </description>
+    </contextDataDef>
+    
+    <!-- ....... Processing Variables ........ -->
+    <contextDataDef name="combinedCategories"   dataType="Data Object"      multiple="true"/>
+    <contextDataDef name="combinedMetadata"     dataType="JSON"/>
+    <contextDataDef name="combinedLinkMetadata" dataType="JSON"             multiple="true"/>
+
+</workflow>

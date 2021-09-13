@@ -1,0 +1,126 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="expireLucidLink"
+	name="Expire"
+	executionLabelExpression="Lucid Link - Expire - ${subject}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	adminOnly="true"
+	group="Lucid Link"
+	sdkVersion=""
+>
+
+	<initialStepName>is workflow executing</initialStepName>
+	
+	
+	<queryStep name="is workflow executing"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Check to see if this workflow is currently executing"
+	>
+		<transition condition="${currentExecutions.size() != 0}">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		<transition condition="${!(lucidLinkPaths == null or lucidLinkPaths.isEmpty())}">
+			<targetStepName>remove lucid link file</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="eq">
+                            <test value="${T(org.apache.commons.lang.StringEscapeUtils).escapeXml(#this.workflow.executionLabel)}"/>
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<deleteFileStep name="remove lucid link file"
+		sourceFilesExpression="${lucidLinkPaths}"
+		executionLabelExpression="removing lucid link files: ${#joinElements(lucidLinkPaths, '|')}"
+		continueOnException="true"
+		nextStep="update metadata"/>
+	
+	<nimbus:setMetadataValueStep name="update metadata"
+		targetExpression="${assetMaster}"
+		propertyNameExpression="lucidLinkPath"
+		valueExpression="${null}"
+		nextStep="update expiration date"/>
+	
+	<nimbus:setMetadataValueStep name="update expiration date"
+		targetExpression="${assetMaster}"
+		propertyNameExpression="lucidLinkExpiration"
+		valueExpression="${null}"
+		nextStep="clean up empty directories"/>
+	
+	<executeSubflowStep name="clean up empty directories"
+		targetWorkflowId="cleanEmptyDirectoryTree"
+		subjectChangePath="${lucidLinkDirs}"
+		subflowTargetDataDef="childDirectory"
+		nextStep="end">
+		<subflowContextDataMapping parentDataDef="lucidLinkBasePath" subflowDataDef="baseDirectory"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- fail -->
+	<noopStep name="workflow is running"
+		executionLabelExpression="Workflow already executing"
+	/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="clip" dataType="Data Object" defaultDataExpression="${subject.getClass().getName().indexOf('Clip') > -1 ? subject : null}" />
+	<contextDataDef name="assetMaster" dataType="Data Object" defaultDataExpression="${clip?.assetMaster ?: subject}" />
+
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="lucidLinkPathString" dataType="String" defaultDataExpression="${assetMaster.metadata.lucidLinkPath}" />
+	<contextDataDef name="lucidLinkPaths" dataType="String" multiple="true"
+		defaultDataExpression="${#splitString(lucidLinkPathString, '|', false, false)}"/>
+	<contextDataDef name="lucidLinkDirs" dataType="String" multiple="true" defaultDataExpression="${lucidLinkPaths.![#filepath(#this)]}" />
+	<contextDataDef name="lucidLinkExpiration" dataType="Date/Time" defaultDataExpression="${assetMaster.metadata?.lucidLinkExpiration}" />
+	<contextDataDef name="currentExecutions" dataType="Data Object" multiple="true"/>
+	<contextDataDef name="lucidLinkBasePath" dataType="String" defaultDataExpression="${#sysconfig('marketplace.lucidlink.basepath') ?: root.filesystem.lucidlink}" />
+
+</workflow>

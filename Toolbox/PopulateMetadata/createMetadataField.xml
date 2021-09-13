@@ -1,0 +1,133 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="
+		http://levelsbeyond.com/schema/latest
+		https://s3-us-west-2.amazonaws.com/schema.levelsbeyond.com/2.3.16.17962/studio.xsd
+	"
+	id="createMetadataField"
+	name="Create Metadata Field"
+	executionLabelExpression="Create Metadata Field: ${fieldInfo.name}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	resultDataDef="responsePayload"
+	sdkVersion=""
+>
+
+	<initialStepName>create metadata field</initialStepName>
+	
+	<submitHttpStep name="create metadata field"
+		executionLabelExpression="Creating metadata field: ${fieldInfo.name}"
+		urlExpression="${apiRequest}"
+		requestMethodExpression="POST"
+		responsePayloadDataDef="responsePayload"
+		responseCodeDataDef="responseCode"
+	>
+		<transition condition="${responseCode.startsWith('2')}">
+			<targetStepName>check field type</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>request failed</targetStepName>
+		</transition>
+		
+		<requestPayloadItem name="body">${fieldInfo}</requestPayloadItem>
+		
+		<requestHeader name="apiKey">${api_key}</requestHeader>
+	</submitHttpStep>
+	
+	<noopStep name="check field type" devStep="true">
+		<transition condition="${fieldType.equals('lookup') AND fieldInfo.get('picklistItems').asText().length() &gt; 0}">
+			<targetStepName>make picklist items to add</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<groovyStep name="make picklist items to add"
+		resultDataDef="picklistItemJson"
+		nextStep="add items to picklist"
+	>
+		<script>
+			<![CDATA[
+				def itemsToAdd = []
+				def items = fieldInfo.get('picklistItems').asText().split(',')
+				
+				items.each { item ->
+					def itemJson = [:]
+					
+					itemJson.field = fieldInfo.name
+					itemJson.label = item
+					itemJson.value = ''
+					
+					itemsToAdd.add(itemJson)
+				}
+				
+				return itemsToAdd
+			]]>
+		</script>
+	</groovyStep>
+	
+	<executeSubflowStep name="add items to picklist"
+		executionLabelExpression="Adding ${picklistItemJson.size()} to picklist"
+		targetWorkflowId="addItemToPicklist"
+		subjectChangePath="${picklistItemJson}"
+		subflowTargetDataDef="picklistInfoJson"
+		nextStep="end"
+	/>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- fail -->
+	<failWorkflowStep name="request failed"
+		executionLabelExpression="Http Request to ${reachEndpoint} failed. Check parameters used request to reach engine API"
+		reasonExpression="Http Request to ${reachEndpoint} failed. Check parameters used request to reach engine API"
+	/>
+	
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="fieldInfo"                        dataType="JSON">
+		<defaultDataExpression>
+			<![CDATA[
+				{
+				      "name": "default",
+				      "displayName": "default",
+				      "type": "Boolean",
+				      "description": "default",
+				      "showInInspector": false
+				}
+			]]>
+		</defaultDataExpression>
+	</contextDataDef>
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="apiRequest"                           dataType="String"           defaultDataExpression="${reach_url + reachEndpoint}" />
+	<contextDataDef name="responsePayload"                      dataType="JSON" />
+	<contextDataDef name="responseCode"                         dataType="String" />
+	<contextDataDef name="metadataField"                        dataType="String"           defaultDataExpression="${fieldInfo.name}" />
+	<contextDataDef name="fieldType"                            dataType="String"           defaultDataExpression="${fieldInfo.type}" />
+	<contextDataDef name="fieldExists"                          dataType="Boolean"          defaultDataExpression="false" />
+	
+	<contextDataDef name="picklistItemJson"                     dataType="JSON"             multiple="true" />
+	<!-- Configurations -->
+	<contextDataDef name="reach_url"                            dataType="String"           defaultDataExpression="${#sysconfig('workflow.reachUrl')}" />
+	<contextDataDef name="api_key"                              dataType="String"           defaultDataExpression="${#sysconfig('workflow.apiKey')}" />
+	<contextDataDef name="reachEndpoint"                        dataType="String"           defaultDataExpression="/reachengine/api/metadata/properties" />
+	
+	<contextDataDef name="createDuplicate"                      dataType="Boolean"          defaultDataExpression="${#sysconfig('workflow.createMetadataField.createDuplicate') ?: false}" />
+</workflow>

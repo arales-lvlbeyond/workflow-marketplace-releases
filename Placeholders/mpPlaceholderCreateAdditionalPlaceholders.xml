@@ -1,0 +1,71 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="mpPlaceholderCreateAdditionalPlaceholders"
+          name="Create Additional Placeholders"
+          executionLabelExpression="Create additional placeholders for ${subject.name}"
+          description=""
+          showInUserInterface="true"
+          group="Placeholder Creation"
+          subjectDOClassName="AssetCollection"
+          subjectQualifierExpression="${metadata?.categoryNames.contains('Episode')}"
+          sdkVersion=""
+>
+
+    <initialStepName>create placeholders</initialStepName>
+    
+
+    <executeSubflowStep
+            name="create placeholders"
+            subjectChangePath="${languages}"
+            subflowTargetDataDef="language"
+            pctComplete="50"
+            targetWorkflowId="${createEpisodeSubflowId}"
+            nextStep="end">
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="additionalPlaceholders"   subflowDataDef="additionalPlaceholders"/>
+        <subflowContextDataMapping parentDataDef="format"                   subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="addOnly"                  subflowDataDef="addOnly"/>
+    </executeSubflowStep>
+
+    <noopStep name="end" />
+
+    <!-- ................................................... Data Defs .................................................... -->
+    <!-- ............ INPUT ............. -->
+
+    <contextDataDef name="metadataForm"             dataType="MetadataForm"     userInput="true"    required="true"     label="Metadata Form"/>
+    <contextDataDef name="metadataFormType"         dataType="String"           defaultDataExpression="access">
+        <description>
+            TEMPORARY!!! (Forms will be standardized to the same format in the future)
+            Valid types = "access" or "panel"
+        </description>
+    </contextDataDef>
+
+    <contextDataDef name="additionalPlaceholders"                       dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameAdditionalPlaceholders)}" multiple="true" />
+    <contextDataDef name="format"                                       dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameFormat).asText()}"/>
+    <contextDataDef name="languages"                                    dataType="String"           defaultDataExpression="${metadataForm?.get(mpMetadataFieldNameLanguages)}"              multiple="true"/>
+
+    <!-- ......... PROCESSING ........... -->
+
+    <!-- metadata field/property names -->
+    <contextDataDef name="mpMetadataFieldNameAdditionalPlaceholders"    dataType="String"           defaultDataExpression="${'mpPlaceholderAdditionalPlaceholders'}"/>
+    <contextDataDef name="mpMetadataFieldNameFormat"                    dataType="String"           defaultDataExpression="${'mpPlaceholderFormat'}"/>
+    <contextDataDef name="mpMetadataFieldNameLanguages"                 dataType="String"           defaultDataExpression="${'mpPlaceholderLanguages'}"/>
+
+    <!-- Subflow-->
+    <contextDataDef name="createEpisodeSubflowId"                       dataType="String"           defaultDataExpression="mpPlaceholderCreateNewEpisodePlaceholders" />
+
+    <contextDataDef name="collection"                                   dataType="Data Object"      defaultDataExpression="${subject}"/>
+    <contextDataDef name="addOnly"                                      dataType="Boolean"          defaultDataExpression="true"/>
+
+    <!-- JSON-->
+    <contextDataDef name="jsonMetadata"             dataType="JSON">
+        <description>
+            Single JSON where:
+            Keys are metadata property names
+            Values are what to set the matching property to on this asset
+        </description>
+    </contextDataDef>
+    
+</workflow>

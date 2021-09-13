@@ -1,0 +1,159 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="glacierObjectArchive"
+    name="Glacier Object Archive"
+    description="Archive a file's contents from AWS S3 to Glacier"
+    executionLabelExpression="Glacier Object Archive | Object: ${s3File?.absolutePath}"
+    showInUserInterface="true"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${truncatedFlag != true}"
+    adminOnly="true"
+    sdkVersion=""
+    resultDataDef="archiveSuccess"
+    >
+
+    <initialStepName>initiate archive</initialStepName>
+    
+
+    <!-- .............................................. Restore Loop ...................................................... -->
+    <!-- initiate Archive -->
+    <runCommandStep name="initiate archive"
+        executionLabelExpression="Initiate Archive | Object: ${s3File?.absolutePath}"
+        executablePathExpression="/usr/bin/aws"
+        stderrDataDef="archiveStdErr"
+        stdoutDataDef="archiveStdOut"
+        continueOnException="true"
+        stallOnErrorResultCode="false"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}">
+        
+        <transition condition="${archiveStdErr.isEmpty()}">
+            <targetStepName>update asset content</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>archive error</targetStepName>
+        </transition>
+
+        <arg>s3</arg>
+        <arg>cp</arg>
+        <arg>${#mapPath(s3File.absolutePath, 's3mapping')}</arg>
+        <arg>${#mapPath(s3File.absolutePath, 's3mapping')}</arg>
+        <arg>--storage-class</arg>
+        <arg>GLACIER</arg>
+    </runCommandStep>
+    
+    <!-- ............................................... End Steps ........................................................ -->
+    <!-- BAD STATES, check to fail -->
+    <noopStep name="archive error"
+        executionLabelExpression="archive request failed: ${archiveStdErr}">
+        <transition condition="${!failOnError}">
+            <targetStepName>archive fail end</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>archive request failed</targetStepName>
+        </transition>
+    </noopStep>
+
+
+    <noopStep name="unknown error"
+        executionLabelExpression="Could not evaluate the state of the restore process.">
+        <transition condition="${!failOnError}">
+            <targetStepName>archive fail end</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>unknown failed</targetStepName>
+        </transition>
+    </noopStep>
+
+
+    <!-- SUCCESS -->
+    
+   <!-- <saveDataObjectStep
+        name="update asset content"
+        executionLabelExpression="Mark asset content ${subject.file.name} as archived"
+        targetDataObjectClass="AssetContent"
+        dataObjectExpression="${subject.originalContent}"
+        nextStep="reindex"
+        >
+        <property name="truncatedFlag">true</property>
+        <property name="restoreKey">${s3File.absolutePath}</property>
+    </saveDataObjectStep>-->
+    
+    <saveDataObjectStep
+        name="update asset content"
+        executionLabelExpression="Mark asset content ${subject.file.name} as truncated"
+        targetDataObjectClass="AssetContent"
+        dataObjectExpression="${subject.originalContent}"
+        >
+        <transition condition="true">
+            <targetStepName>set asset as archived</targetStepName>
+        </transition>
+        <property name="truncatedFlag">true</property>
+        <property name="restoreKey">${s3File.absolutePath}</property>
+    </saveDataObjectStep>
+    
+    <saveDataObjectStep name="set asset as archived"
+        dataObjectExpression="${subject}"
+        executionLabelExpression="Mark asset ${subject.name} as archived"
+        nextStep="reindex"
+        >
+        <property name="status">ARCHIVED</property>
+    </saveDataObjectStep>
+    
+    <raiseWorkflowEventStep name="reindex"
+        eventTypeExpression="ensureIndexed"
+        executionLabelExpression="Ensure Asset Indexed"
+        devStep="true"
+        nextStep="end"
+        >
+        <property name="indexTargetRef">${subject}</property>
+    </raiseWorkflowEventStep>
+    
+    <setContextData name="end"
+        executionLabelExpression="end: file archived successfully"
+        targetDataDef="archiveSuccess"
+        valueExpression="true"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"/>
+
+
+    <!-- BAD RESULT, but continue -->
+    <setContextData name="archive fail end"
+        executionLabelExpression="end: archive request failed"
+        targetDataDef="archiveSuccess"
+        valueExpression="false"
+        pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"/>
+
+
+    <!-- FAIL STATES -->
+    <failWorkflowStep name="failed to get metadata"
+        reasonExpression="head-object request failed: ${headObjectStdErr}"
+        executionLabelExpression="head-object request failed: ${headObjectStdErr}"/>
+
+
+    <failWorkflowStep name="archive request failed"
+        reasonExpression="restore-object request failed: ${archiveStdErr}"
+        executionLabelExpression="restore-object request failed: ${archiveStdErr}"/>
+
+
+    <failWorkflowStep name="unknown failed"
+        reasonExpression="Could not evaluate the state of the restore process."
+        executionLabelExpression="Could not evaluate the state of the restore process."/>
+
+
+    <!-- ............................................ Context Data Defs ................................................... -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="s3File"                   dataType="File"         defaultDataExpression="${subject.originalContent?.file}"/>
+    <contextDataDef name="failOnError"              dataType="Boolean"      defaultDataExpression="true"/>
+
+    <!-- ............ RESULT ............ -->
+    <contextDataDef name="archiveSuccess"           dataType="Boolean"      defaultDataExpression="false"/>
+
+    <!-- .......... PROCESSING .......... -->
+    <contextDataDef name="archiveStdOut"            dataType="String"/>
+    <contextDataDef name="archiveStdErr"            dataType="String"       multiple="true"/>
+
+    <!-- Defaults -->
+    <contextDataDef name="wfExe"                    dataType="Data Object"  defaultDataExpression="${#this}"/>
+    
+</workflow>

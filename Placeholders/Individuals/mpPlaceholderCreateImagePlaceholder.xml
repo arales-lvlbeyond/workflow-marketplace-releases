@@ -1,0 +1,189 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="mpPlaceholderCreateImagePlaceholder"
+          name="Create Image Placeholder"
+          executionLabelExpression="Creating Placeholder ${assetName} test"
+          description=""
+          subjectDOClassName=""
+          showInUserInterface="false"
+          resultDataDef=""
+          deadlineExpression=""
+          sdkVersion="">
+
+    <initialStepName>get existing assets</initialStepName>
+
+    <!-- Can't use a queryStep to find assetMaster by name, so need to get them all and check the asset name in 2 separate steps -->
+    <queryStep
+            name="get existing assets"
+            executionLabelExpression="Found ${existingAssets != null ? existingAssets.size() : '0'} assets."
+            targetDataObjectClass="AssetMaster"
+            resultDataDef="existingAssets">
+        <transition condition="${existingAssets != null and existingAssets.size() > 0}">
+            <targetStepName>check for existing</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>create image file</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+				<criteria>
+					<and>
+						<condition property="collectionMemberships.collection.id" op="eq"><test value="${collection.id}"/></condition>
+					</and>
+				</criteria>
+			]]>
+        </criteria>
+    </queryStep>
+
+    <groovyStep
+            name="check for existing"
+            executionLabelExpression="Asset exists? ${assetExists}"
+            resultDataDef="assetExists">
+        <transition condition="${assetExists}">
+            <targetStepName>asset exists</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>create image file</targetStepName>
+        </transition>
+        <script>
+            <![CDATA[
+            exists = false
+            existingAssets.each() { asset ->
+                if (asset.name == assetName) exists = true
+            }
+            return exists
+            ]]>
+        </script>
+    </groovyStep>
+
+    <runCommandStep
+            name="create image file"
+            pctComplete="10"
+            executablePathExpression="/bin/touch"
+            executionLabelExpression="creating ${fileName}"
+            nextStep="ingest image file">
+        <arg>${filePath}</arg>
+    </runCommandStep>
+
+    <saveAssetStep
+            name="ingest image file"
+            assetNameExpression="${assetName}"
+            executionLabelExpression="Ingesting file ${filePath}"
+            contentExpression="${filePath}"
+            contentUseExpression="|SOURCE|MEZZANINE|"
+            pctComplete="20"
+            resultDataDef="assetVersion"
+            nextStep="add content meta"/>
+
+    <setContextData
+            name="add content meta"
+            executionLabelExpression="Status = ${#picklistLabel(mpMetadataFieldNameContentStatus,contentStatus)}, Type = ${#picklistLabel(mpMetadataFieldNameContentType,contentType)}, Language = ${language != null ? language : 'null'}"
+            targetDataDef="jsonMetadata"
+            valueExpression="${jsonMetadata.put(mpMetadataFieldNameContentStatus,contentStatus)}"
+            nextStep="save asset metadata">
+        <set targetDataDef="jsonMetadata" valueExpression="${jsonMetadata.put(mpMetadataFieldNameContentType,contentType)}"/>
+        <set targetDataDef="jsonMetadata" valueExpression="${jsonMetadata.put(mpMetadataFieldNameLanguage,language)}"/>
+    </setContextData>
+
+    <saveDataObjectStep
+            name="save asset metadata"
+            executionLabelExpression="Adding ${jsonMetadata}"
+            dataObjectExpression="${assetVersion.masterAsset.metadata}"
+            jsonValuesDataDef="jsonMetadata"
+            nextStep="set asset master"/>
+
+    <setContextData
+            name="set asset master"
+            targetDataDef="assetMaster"
+            valueExpression="${assetVersion.masterAsset}"
+            nextStep="set category"/>
+
+    <nimbus:changeMetaCategoryStep
+            name="set category"
+            pctComplete="60"
+            executionLabelExpression="Adding Category ${categoryName}"
+            targetObjectExpression="${assetMaster}"
+            nextStep="add to collection">
+        <nimbus:addCategory>${categoryName}</nimbus:addCategory>
+    </nimbus:changeMetaCategoryStep>
+
+    <saveDataObjectStep
+            name="add to collection"
+            targetDataObjectClass="AssetCollectionItem"
+            nextStep="cleanup">
+        <property name="collection">${collection}</property>
+        <property name="asset">${assetMaster}</property>
+        <property name="index">${collectionItemIndex}</property>
+    </saveDataObjectStep>
+
+    <deleteFileStep
+            name="cleanup"
+            executionLabelExpression="Removing temp file ${filePath}"
+            sourceFilesExpression="${filePath}"
+            nextStep="raise ensure indexed event"/>
+
+    <raiseWorkflowEventStep
+            name="raise ensure indexed event"
+            eventTypeExpression="ensureIndexed"
+            executionLabelExpression="Ensure Asset Indexed"
+            nextStep="end">
+        <property name="indexTargetRef">${assetMaster}</property>
+    </raiseWorkflowEventStep>
+
+    <noopStep
+            name="asset exists"
+            executionLabelExpression="Asset exists already- Skipping asset creation."/>
+
+    <noopStep name="end"/>
+
+
+    <!-- ................................................... Data Defs .................................................... -->
+
+    <!-- ............ INPUT FROM PARENT WORKFLOW............. -->
+
+    <contextDataDef name="collection"                   dataType="Data Object"/>
+    <contextDataDef name="language"                     dataType="String" />
+    <contextDataDef name="contentType"                  dataType="String" />
+    <contextDataDef name="categoryName"                 dataType="String"       defaultDataExpression="Image Component"/>
+    <contextDataDef name="deliverable"                  dataType="Boolean"      defaultDataExpression="false"/>
+
+    <contextDataDef name="jsonMetadata"                 dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    ${mpMetadataFieldNameSeries}: "${collection.metadata.mpPlaceholderSeries}",
+                    ${mpMetadataFieldNameSeason}: "${collection.metadata.mpPlaceholderSeason}",
+                    ${mpMetadataFieldNameEpisodeNumber}: "${collection.metadata.mpPlaceholderEpisodeNumber}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+
+    <!-- ......... PROCESSING ........... -->
+
+    <!-- metadata field/property names -->
+    <contextDataDef name="mpMetadataFieldNameSeries"                    dataType="String"           defaultDataExpression="${'mpPlaceholderSeries'}"/>
+    <contextDataDef name="mpMetadataFieldNameSeason"                    dataType="String"           defaultDataExpression="${'mpPlaceholderSeason'}"/>
+    <contextDataDef name="mpMetadataFieldNameEpisodeNumber"             dataType="String"           defaultDataExpression="${'mpPlaceholderEpisodeNumber'}"/>
+    <contextDataDef name="mpMetadataFieldNameContentType"               dataType="String"           defaultDataExpression="${'mpPlaceholderContentType'}"/>
+    <contextDataDef name="mpMetadataFieldNameContentStatus"             dataType="String"           defaultDataExpression="${'mpPlaceholderContentStatus'}"/>
+    <contextDataDef name="mpMetadataFieldNameLanguage"                  dataType="String"           defaultDataExpression="${'mpPlaceholderLanguage'}"/>
+
+    <contextDataDef name="existingAssets"                               dataType="Data Object"      multiple="true"/>
+    <contextDataDef name="assetExists"                                  dataType="Boolean"/>
+    <contextDataDef name="extension" label="Extension"                  dataType="String"           defaultDataExpression="jpg"/>
+    <contextDataDef name="fileName"                                     dataType="String"           defaultDataExpression="${assetName}.${extension}"/>
+    <contextDataDef name="checkFileName"                                dataType="String"           defaultDataExpression="${fileName.replace(' ','_')}"/>
+    <contextDataDef name="filePath"                                     dataType="String"           defaultDataExpression="${#sysconfig('filesystem.root.temp')}/${fileName}"/>
+    <contextDataDef name="assetVersion"                                 dataType="Data Object"/>
+    <contextDataDef name="assetMaster"                                  dataType="Data Object"/>
+
+    <contextDataDef name="rootName"                                     dataType="String"           defaultDataExpression="${#picklistLabel(mpMetadataFieldNameSeries,collection.metadata.mpPlaceholderSeries)} - S${#picklistLabel(mpMetadataFieldNameSeason,collection.metadata.mpPlaceholderSeason)} - E${#picklistLabel(mpMetadataFieldNameEpisodeNumber,collection.metadata.mpPlaceholderEpisodeNumber)}"/>
+    <contextDataDef name="assetName"                                    dataType="String"           defaultDataExpression="${rootName} - ${language.replace('_','-')}${deliverable ? ' - ' + 'Deliverable' : ''} - ${#picklistLabel(mpMetadataFieldNameContentType,contentType)}"/>
+    <contextDataDef name="asset"                                        dataType="Data Object"/>
+
+    <contextDataDef name="contentStatus"                                dataType="String"           defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentStatus,'Placeholder')}"/>
+    <contextDataDef name="collectionItemIndex"                          dataType="Integer"          defaultDataExpression="${collection.items.size() + 1}"/>
+</workflow>

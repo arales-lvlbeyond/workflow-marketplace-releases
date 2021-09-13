@@ -1,0 +1,273 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="sendToVimeo"
+	name="Send Asset to Vimeo"
+	executionLabelExpression="Send Asset to Vimeo | ${subject.name}"
+	subjectDOClassName="VideoAssetMaster"
+	showInUserInterface="true"
+	sdkVersion=""
+	hasDownload="false"
+	group="Vimeo"
+>
+	
+	<initialStepName>Pre-sign S3 object</initialStepName>
+	
+	
+	<runCommandStep name="Pre-sign S3 object"
+		executablePathExpression="${awsCli}"
+		resultCodeDataDef="awsReturnCode"
+		stdoutDataDef="awsReturnBody"
+		nextStep="Encode URL"
+	>
+		<arg>s3</arg>
+		<arg>presign</arg>
+		<arg>${#mapPath(asset.file.absolutePath,'s3mapping')}</arg>
+		<arg>--expires-in</arg>
+		<arg>86400</arg>
+	</runCommandStep>
+	
+	<groovyStep name="Encode URL"
+		resultDataDef="encodedURL"
+		nextStep="Generate short URL">
+		<script>
+			<![CDATA[
+			String linkToAsset = URLEncoder.encode(awsReturnBody);
+			String tUrl = binding.getVariable("tinyUrl");
+			return tUrl + linkToAsset
+			]]>
+		</script>
+	</groovyStep>
+	
+	<submitHttpStep name="Generate short URL"
+		urlExpression="${encodedURL}"
+		requestMethodExpression="POST"
+		responsePayloadDataDef="signedUrl">
+		<transition condition="${asset.metadata.vimeoId != null}">
+			<targetStepName>check if already on vimeo</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Upload video to Vimeo</targetStepName>
+		</transition>
+	</submitHttpStep>
+	
+	<!-- Check to see if already uploaded to vimeo, if so make a new version -->
+	<submitHttpStep name="check if already on vimeo"
+		urlExpression="https://api.vimeo.com/me/videos/${asset.metadata.vimeoId}"
+		requestMethodExpression="GET"
+		responsePayloadDataDef="vimeoCheckResponseBody"
+		responseCodeDataDef="vimeoCheckResponseCode"
+		continueOnException="true"
+	>
+		<transition condition="${vimeoCheckResponseCode.startsWith('2')}">
+			<targetStepName>create new version</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Upload video to Vimeo</targetStepName>
+		</transition>
+		<requestHeader name="Authorization">Bearer ${vimeoAccessToken}</requestHeader>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="Accept">application/vnd.vimeo.*+json;version=3.4</requestHeader>
+	</submitHttpStep>
+	
+	<!-- VERSION     Upload to Vimeo as new version of video -->
+	<submitHttpStep name="create new version"
+		urlExpression="https://api.vimeo.com/videos/${asset.metadata.vimeoId}/versions"
+		requestMethodExpression="POST"
+		responsePayloadDataDef="vimeoVersionResponseBody"
+		responseCodeDataDef="vimeoVersionResponseCode"
+	>
+		<transition condition="${vimeoVersionResponseCode.startsWith('2')}">
+			<targetStepName>save vimeo link</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>http error</targetStepName>
+		</transition>
+		<requestHeader name="Authorization">Bearer ${vimeoAccessToken}</requestHeader>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="Accept">application/vnd.vimeo.*+json;version=3.4</requestHeader>
+		<requestPayloadItem name="body">
+			{
+			"upload": {
+			"approach": "pull",
+			"size": "${size}",
+			"link": "${signedUrl}"
+			},
+			"name": "${videoName}",
+			"privacy": { "view": "${privacy}" },
+			"description": "${reachUrl}/#/assets/${#mediaType(asset).toLowerCase()}/${asset.id}"
+			}
+		</requestPayloadItem>
+	</submitHttpStep>
+	
+	<!-- NEW VIDEO        Upload to Vimeo as new video -->
+	<submitHttpStep name="Upload video to Vimeo"
+		urlExpression="https://api.vimeo.com/me/videos"
+		requestMethodExpression="POST"
+		responsePayloadDataDef="vimeoResponseBody"
+		responseCodeDataDef="vimeoResponseCode"
+	>
+		<transition condition="${vimeoResponseCode.startsWith('2')}">
+			<targetStepName>determine folder location</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>http error</targetStepName>
+		</transition>
+		<requestHeader name="Authorization">Bearer ${vimeoAccessToken}</requestHeader>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="Accept">application/vnd.vimeo.*+json;version=3.4</requestHeader>
+		<requestPayloadItem name="body">
+			{
+			"upload": {
+			"approach": "pull",
+			"size": "${size}",
+			"link": "${signedUrl}"
+			},
+			"name": "${videoName}",
+			"privacy": { "view": "${privacy}" },
+			"description": "${reachUrl}/#/assets/${#mediaType(asset).toLowerCase()}/${asset.id}"
+			}
+		</requestPayloadItem>
+	</submitHttpStep>
+	
+	
+	<noopStep name="determine folder location"
+		executionLabelExpression="Checking information for which folder to move to" >
+		<transition condition="${subject.collectionMemberships.collection.size() > 1}">
+			<targetStepName>save vimeo link</targetStepName>
+		</transition>
+		<transition condition="${subject.collectionMemberships.collection == null}">
+			<targetStepName>save vimeo link</targetStepName>
+		</transition>
+		<transition condition="${subject.collectionMemberships.collection.metadata.vimeoProjectId == null}">
+			<targetStepName>save vimeo link</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>set collection</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<!-- ......................................  Move to correct folder   ...................................... -->
+	<setContextData name="set collection"
+		targetDataDef="videoCollection"
+		valueExpression="${subject.collectionMemberships.collection}"
+		nextStep="set folder" />
+	
+	<setContextData name="set folder"
+		targetDataDef="vimeoFolderUrl"
+		valueExpression="https://api.vimeo.com/me/projects/${videoCollection.metadata.vimeoProjectId}/videos/${vimeoResponseBody.uri.split('/')[2]}"
+		nextStep="move video to correct folder" />
+	
+	<submitHttpStep name="move video to correct folder"
+		urlExpression="${vimeoFolderUrl}"
+		requestMethodExpression="PUT"
+		responsePayloadDataDef="vimeoResponseBodyMove"
+		responseCodeDataDef="vimeoResponseCodeMove"
+	>
+		<transition condition="${vimeoResponseCodeMove.startsWith('2')}">
+			<targetStepName>save vimeo link</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>http error</targetStepName>
+		</transition>
+		<requestHeader name="Authorization">Bearer ${vimeoAccessToken}</requestHeader>
+		<requestHeader name="Content-Type">application/json</requestHeader>
+		<requestHeader name="Accept">application/vnd.vimeo.*+json;version=3.4</requestHeader>
+	</submitHttpStep>
+	
+	<setAssociationMetadataStep name="save vimeo link"
+		targetExpression="${asset}"
+		propertyNameExpression="vimeoLink"
+		valueExpression="{&quot;title&quot;: &quot;${vimeoResponseBody.link}&quot;, &quot;url&quot;: &quot;${vimeoResponseBody.link}&quot;}"
+		nextStep="save metadata on asset"
+	/>
+	
+	<saveDataObjectStep name="save metadata on asset"
+		executionLabelExpression="saving metadata on ${asset.name}"
+		dataObjectExpression="${asset.metadata}"
+		nextStep="end">
+		<property name="vimeoId">${vimeoResponseBody.uri.split('/')[2]}</property>
+		<property name="vimeoStatus">${vimeoStatus}</property>
+	</saveDataObjectStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<createFailureNotificationStep name="http error"
+		notificationTypeExpression="error"
+		notificationBodyExpression="Could not send to Vimeo. HTTP Error code ${vimeoResponseCode}"/>
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="confirmation" dataType="Boolean"  userInput="true"  label="Send to Vimeo?"  defaultDataExpression="true" />
+	<contextDataDef name="contentUse" label="Content Use" dataType="String" userInput="true" required="false" displayIndex="0" defaultDataExpression="PROXY">
+		<picklist>
+			<picklistItem value="SOURCE" label="Source" index="1"/>
+			<picklistItem value="MEZZANINE" label="Mezzanine" index="2"/>
+			<picklistItem value="PROXY" label="Proxy" index="3"/>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="videoName" dataType="String" label="Video Name" userInput="true" required="false" displayIndex="1" defaultDataExpression="${asset.name}"/>
+	<contextDataDef name="videoDescription" dataType="String" label="Description" userInput="true" required="false" displayIndex="2" defaultDataExpression="${reachUrl}/#/assets/${#mediaType(asset).toLowerCase()}/${asset.id}"/>
+	<contextDataDef name="project" dataType="String" label="Project (folder)" userInput="true" required="false" displayIndex="3">
+		<picklist>
+			<picklistItem value="Reach Engine | Demo">2938129</picklistItem>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="privacy" dataType="String" label="Privacy" userInput="true" required="false" displayIndex="4" defaultDataExpression="nobody">
+		<picklist>
+			<picklistItem value="nobody">nobody</picklistItem>
+			<picklistItem value="anybody">anybody</picklistItem>
+			<picklistItem value="contacts">contacts</picklistItem>
+			<picklistItem value="disable">disable</picklistItem>
+			<picklistItem value="password">password</picklistItem>
+			<picklistItem value="unlisted">unlisted</picklistItem>
+			<picklistItem value="users">users</picklistItem>
+		</picklist>
+	</contextDataDef>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="targetContent" dataType="Data Object" defaultDataExpression="${contentUse.equals('SOURCE') ? subject.originalContent : contentUse.equals('MEZZANINE') ? subject.mezzanine : subject.proxy}"/>
+	<contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reachengine.url')}"/>
+	<contextDataDef name="asset" dataType="Data Object" defaultDataExpression="${subject}"/>
+	<contextDataDef name="size" dataType="String" defaultDataExpression="${targetContent.fileSize}"/>
+	<contextDataDef name="signedUrl" dataType="String"/>
+	<contextDataDef name="jsonMetadata" dataType="JSON"/>
+	<contextDataDef name="vimeoAccessToken" dataType="String" defaultDataExpression="${#sysconfig('vimeo.access.token')}" hidden="true"/>
+	<contextDataDef name="vimeoResponseBody" dataType="JSON"/>
+	<contextDataDef name="vimeoResponseCode" dataType="String"/>
+	<contextDataDef name="vimeoFolderUrl" dataType="String"  />
+	<contextDataDef name="vimeoResponseBodyMove" dataType="JSON"/>
+	<contextDataDef name="vimeoResponseCodeMove" dataType="String"/>
+	<contextDataDef name="vimeoCheckResponseBody" dataType="JSON"/>
+	<contextDataDef name="vimeoCheckResponseCode" dataType="String"/>
+	<contextDataDef name="vimeoVersionResponseBody" dataType="JSON"/>
+	<contextDataDef name="vimeoVersionResponseCode" dataType="String"/>
+	<contextDataDef name="fileToUpload" dataType="File"/>
+	<contextDataDef name="videoCollection" dataType="Data Object" />
+	<contextDataDef name="awsCli" dataType="String" defaultDataExpression="/usr/bin/aws"/>
+	<contextDataDef name="awsReturnCode" dataType="Integer"/>
+	<contextDataDef name="awsReturnBody" dataType="String"/>
+	<contextDataDef name="encodedURL" dataType="String"/>
+	<contextDataDef name="tinyUrl" dataType="String" defaultDataExpression="https://tinyurl.com/api-create.php?url="/>
+	<contextDataDef name="vimeoStatus" dataType="String"    defaultDataExpression="Published" />
+
+</workflow>

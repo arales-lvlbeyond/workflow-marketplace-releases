@@ -1,0 +1,259 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2018 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="glacierObjectRestore"
+	name="Glacier Object Restore"
+	description="Restore a file's contents from AWS Glacier to S3 RRS"
+	executionLabelExpression="Glacier Object Restore | Object: ${fileToRestore} | Retrieval: ${retrievalMode}"
+	showInUserInterface="false"
+	subjectDOClassName="AssetMaster"
+	adminOnly="true"
+	sdkVersion=""
+	resultDataDef="restoreSuccess"
+	>
+	
+	<initialStepName>get object metadata</initialStepName>
+	
+	
+	<!-- .............................................. Restore Loop ...................................................... -->
+	<runCommandStep name="get object metadata"
+		executablePathExpression="/reachengine/cmds/run_aws.sh"
+		stderrDataDef="headObjectStdErr"
+		stdoutDataDef="headObjectStdOut"
+		continueOnException="true"
+		stallOnErrorResultCode="false"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		>
+		<transition condition="${headObjectStdErr.isEmpty()}">
+			<targetStepName>set output json</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>check head object error</targetStepName>
+		</transition>
+		
+		<arg>s3api</arg>
+		<arg>head-object</arg>
+		<arg>--bucket</arg>
+		<arg>${bucket}</arg>
+		<arg>--key</arg>
+		<arg>${key}</arg>
+	</runCommandStep>
+	
+	
+	<noopStep name="check head object error"
+		executionLabelExpression="Did we get a 405 error, indicating RRS Loss? ${headObjectStdErr.contains('(405)')}"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		>
+		<transition condition="${headObjectStdErr.contains('(405)')}">
+			<targetStepName>initiate retrieval</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>metadata error</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<setContextData name="set output json"
+		executionLabelExpression="Metadata: ${outputJson}"
+		targetDataDef="outputJson"
+		valueExpression="${headObjectStdOut}"
+		devStep="true"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		nextStep="confirm storage class"
+		/>
+	
+	
+	<!-- Note: x-amz-storage-class : Provides storage class information of the object. Amazon S3 returns this header for all objects except for Standard storage class objects -->
+	<noopStep name="confirm storage class"
+		executionLabelExpression="confirming storage class: ${outputJson.get('StorageClass') != null ? outputJson.get('StorageClass').asText() : 'Standard' }"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		>
+		<!-- no restore in progress -->
+		<transition condition="${(outputJson.get('StorageClass')?.asText().equals('GLACIER') OR outputJson.get('StorageClass')?.asText().equals('DEEP_ARCHIVE')) AND outputJson.get('Restore') == null AND restoreInProgress == false}">
+			<targetStepName>initiate retrieval</targetStepName>
+		</transition>
+		<!-- restore started and still in progress -->
+		<transition condition="${(outputJson.get('StorageClass')?.asText().equals('GLACIER') OR outputJson.get('StorageClass')?.asText().equals('DEEP_ARCHIVE')) AND !outputJson.get('Restore').asText().contains('expiry-date')}">
+			<targetStepName>delay before file check</targetStepName>
+		</transition>
+		<!-- restore finished -->
+		<transition condition="${outputJson.get('Restore') != null AND outputJson.get('Restore').asText().contains('expiry-date')}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<!-- not glaciered -->
+		<transition condition="${outputJson.get('StorageClass') == null}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<!-- something happened -->
+		<transition condition="true">
+			<targetStepName>unknown error</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<!-- initiate retrieval -->
+	<runCommandStep name="initiate retrieval"
+		displayName="Initiate Retrieval for ${restoreDays} days | Tier: ${retrievalMode}"
+		executablePathExpression="/reachengine/cmds/run_aws.sh"
+		stderrDataDef="retrievalStdErr"
+		stdoutDataDef="retrievalStdOut"
+		continueOnException="true"
+		stallOnErrorResultCode="false"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		>
+		<transition condition="${retrievalStdErr.isEmpty()}">
+			<targetStepName>delay before file check</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>restore error</targetStepName>
+		</transition>
+		
+		<arg>s3api</arg>
+		<arg>restore-object</arg>
+		<arg>--bucket</arg>
+		<arg>${bucket}</arg>
+		<arg>--key</arg>
+		<arg>${key}</arg>
+		<arg>--restore-request</arg>
+		<arg>Days=${restoreDays},GlacierJobParameters={Tier=${retrievalMode}}</arg>
+	</runCommandStep>
+	
+	
+	<!-- delay between file checks, depending on retrieval mode -->
+	<delayStep name="delay before file check"
+		executionLabelExpression="Waiting ${delaySeconds} seconds to check the restore status"
+		delaySecondsExpression="${delaySeconds}"
+		devStep="true"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		nextStep="get object metadata"
+		/>
+	<!-- ............................................ End Restore Loop .................................................... -->
+	
+	
+	<!-- ............................................... End Steps ........................................................ -->
+	<!-- BAD STATES, check to fail -->
+	<noopStep name="metadata error"
+		executionLabelExpression="head-object request failed: ${headObjectStdErr}"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		>
+		<transition condition="${!failOnError}">
+			<targetStepName>restore fail end</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to get metadata</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<noopStep name="restore error"
+		executionLabelExpression="restore-object request failed: ${retrievalStdErr}"
+		>
+		<transition condition="${!failOnError}">
+			<targetStepName>restore fail end</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>restore request failed</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<noopStep name="unknown error"
+		executionLabelExpression="Could not evaluate the state of the restore process."
+		>
+		<transition condition="${!failOnError}">
+			<targetStepName>restore fail end</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>unknown failed</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<!-- SUCCESS -->
+	<setContextData name="end"
+		executionLabelExpression="end: file restored successfully"
+		targetDataDef="restoreSuccess"
+		valueExpression="true"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		/>
+	
+	
+	<!-- BAD RESULT, but continue -->
+	<setContextData name="restore fail end"
+		executionLabelExpression="end: restore request failed"
+		targetDataDef="restoreSuccess"
+		valueExpression="false"
+		pctCompleteExpression="${(wfExe.stepExecutions.size() *100d )/ wfExe.workflowVersion.steps.size()}"
+		/>
+	
+	
+	<!-- FAIL STATES -->
+	<failWorkflowStep name="failed to get metadata"
+		reasonExpression="head-object request failed: ${headObjectStdErr}"
+		executionLabelExpression="head-object request failed: ${headObjectStdErr}"
+		/>
+	
+	
+	<failWorkflowStep name="restore request failed"
+		reasonExpression="restore-object request failed: ${retrievalStdErr}"
+		executionLabelExpression="restore-object request failed: ${retrievalStdErr}"
+		/>
+	
+	
+	<failWorkflowStep name="unknown failed"
+		reasonExpression="Could not evaluate the state of the restore process."
+		executionLabelExpression="Could not evaluate the state of the restore process."
+		/>
+	
+	
+	<!-- ............................................ Context Data Defs ................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="fileToRestore"                   dataType="String" defaultDataExpression="${subject.sourceContent.restoreKey}"/>
+	<contextDataDef name="retrievalMode"            dataType="String"       defaultDataExpression="Bulk">
+		<picklist>
+			<picklistItem value="Bulk"/>
+			<picklistItem value="Standard"/>
+			<picklistItem value="Expedited"/>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="failOnError"              dataType="Boolean"      defaultDataExpression="true"/>
+	
+	<!-- ............ RESULT ............ -->
+	<contextDataDef name="restoreSuccess"           dataType="Boolean"      defaultDataExpression="false"/>
+	
+	<!-- .......... PROCESSING .......... -->
+	<contextDataDef name="outputJson"               dataType="JSON"/>
+	<contextDataDef name="headObjectStdOut"         dataType="String"/>
+	<contextDataDef name="headObjectStdErr"         dataType="String"       multiple="true"/>
+	<contextDataDef name="retrievalStdOut"          dataType="String"/>
+	<contextDataDef name="retrievalStdErr"          dataType="String"       multiple="true"/>
+	<contextDataDef name="restoreInProgress"        dataType="Boolean"      defaultDataExpression="false"/>
+	<!-- Defaults -->
+	<contextDataDef name="restoreKey"				dataType="String"		defaultDataExpression="${fileToRestore.replace('s3://', '').replaceFirst('/', ':')}"/>
+	<contextDataDef name="key"                      dataType="String"       defaultDataExpression="${restoreKey.split(':')[1]}"/>
+	<contextDataDef name="bucket"                   dataType="String"       defaultDataExpression="${restoreKey.split(':')[0]}"/>
+	<contextDataDef name="wfExe"                    dataType="Data Object"  defaultDataExpression="${#this}"/>
+	<contextDataDef name="restoreDays"              dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.glacierObjectRestore.rrsRestoreDays') ?: 60}"/>
+	<contextDataDef name="bulkDelaySeconds"         dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.glacierObjectRestore.bulkRetrieval.pollRate') ?: 3600}"/>
+	<contextDataDef name="standardDelaySeconds"     dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.glacierObjectRestore.standardRetrieval.pollRate') ?: 1800}"/>
+	<contextDataDef name="expeditedDelaySeconds"    dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.glacierObjectRestore.expeditedRetrieval.pollRate') ?: 900}"/>
+	<contextDataDef name="delaySeconds"             dataType="Integer"      defaultDataExpression="${retrievalMode.equals('Expedited') ? expeditedDelaySeconds : (retrievalMode.equals('Standard') ? standardDelaySeconds : bulkDelaySeconds)}"/>
+
+</workflow>

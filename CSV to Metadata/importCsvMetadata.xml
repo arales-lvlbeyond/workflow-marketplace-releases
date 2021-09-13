@@ -1,0 +1,290 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="
+    http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/workflow-2.3.xsd
+    http://levelsbeyond.com/schema/workflow/nimbus http://www.levelsbeyond.com/schema/production/nimbus-common-workflow-1.5.xsd
+    "
+	
+	id="importCsvMetadata"
+	name="Import Metadata from CSV"
+	executionLabelExpression="Import ${fileWithMetaData.name} to assign metadata"
+	description=""
+	subjectDOClassName=""
+	showInUserInterface="true"
+	sdkVersion=""
+
+>
+	<initialStepName>check if workflow is running</initialStepName>
+	
+	
+	<!-- ................................................... Initial Checks .................................................... -->
+	<queryStep name="check if workflow is running"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Is a workflow running on this directory already? ${currentExecutions.size() != 0}">
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>copy csv file</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<!-- Move CSV file to temp so accessable when on ECS -->
+	<copyFileStep name="copy csv file"
+		executionLabelExpression="placing file (${csvFile.name}) in temp"
+		sourceFileExpression="${fileWithMetaData}"
+		targetDirectoryExpression="${tempDir}"
+		createTargetDirectoryFlag="true"
+		resultDataDef="fileWithMetaDataPath"
+		devStep="true"
+		nextStep="convert csv file to json"
+	/>
+	
+	<!-- Convert CSV to JSONs -->
+	<groovyStep name="convert csv file to json"
+		resultDataDef="result"
+		executionLabelExpression="processing ${fileWithMetaDataPath}"
+		nextStep="convert output to json" >
+		<script>
+            <![CDATA[
+			
+			rowList = [];
+			def lines = 0;
+			def result = "";
+			
+			private String headingToProperty(input)
+			{
+				def String[] parts = input.split();
+				def output = parts[0];
+				for (int word = 1; word < parts.size(); word ++) {
+					output = output + parts[word].capitalize()
+				}
+				return output
+			}
+			
+			new File(fileWithMetaDataPath).splitEachLine(',') {
+				def row = [];
+				def currentIteration=0;
+				def currentStore=0;
+				def concatenateString="";
+				while(it.size() > currentIteration) {
+					
+					if(it.get(currentIteration).startsWith('"')) {
+						concatenateString = it.get(currentIteration);
+						currentIteration = currentIteration+1;
+						while (it.get(currentIteration).endsWith('"')) {
+							concatenateString = concatenateString + it.get(currentIteration);
+							currentIteration = currentIteration+1;
+						}
+						row[currentStore] = concatenateString;
+					
+					} else {
+						row[currentStore] = it.get(currentIteration);
+					}
+					currentIteration = currentIteration+1;
+					currentStore = currentStore+1;
+				}
+				rowList << row;
+				lines++
+			}
+			
+			result = "["
+			
+			// loop through rows 1-n
+			for (int currentRow = 1; currentRow < rowList.size(); currentRow++) {
+				result = result + "{"
+				for (int currentColumn = 0; currentColumn < rowList[0].size(); currentColumn++) {
+					if (rowList[currentRow][currentColumn] != null) {
+						result = result + "'" + headingToProperty(rowList[0][currentColumn]) + "':'" + rowList[currentRow][currentColumn].replaceAll("'","") + "'"
+					}
+					else {
+						result = result + "'" + headingToProperty(rowList[0][currentColumn]) + "':''"
+					}
+					if (currentColumn != rowList[0].size() -1 ) {
+						result = result + ","
+					}
+				}
+				if (currentRow != rowList.size() -1 ) {
+					result = result + "},"
+				} else {
+					result = result + "}"
+				}
+			}
+			
+			result = result + "]"
+			
+			]]>
+        </script>
+	</groovyStep>
+	
+	<setContextData name="convert output to json"
+		targetDataDef="jsonRows"
+		valueExpression="${result}"
+		executionLabelExpression="${result.substring(0,3500)}"
+		nextStep="check if jsonRows is empty" />
+	
+	
+	<noopStep name="check if jsonRows is empty"
+		executionLabelExpression="are there rows in jsonRows? ${jsonRows != null AND jsonRows.size() &gt; 0}" >
+		<transition condition="${jsonRows != null AND jsonRows.size() &gt; 0}">
+			<targetStepName>query for running subflows</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>no csvRow to process</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<!-- ................................................... Queue Loop ................................................... -->
+	<queryStep name="query for running subflows"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="executingSubflows"
+		executionLabelExpression="checking for workflows (with id = ${subflowId}) that are also not in a finished state"
+		devStep="true"
+		nextStep="check running subflows"
+	>
+		<criteria>
+			<![CDATA[
+            <criteria>
+                <and>
+                    <condition property="workflowVersion.workflow.key" op="eq">
+                        <test value="${ingestSubflow}"/>
+                    </condition>
+                    <condition property="status" op="in">
+                        <tests>
+                            <test value="CREATED" />
+                            <test value="QUEUED" />
+                            <test value="EXECUTING" />
+                         </tests>
+                    </condition>
+                </and>
+            </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	
+	<noopStep name="check running subflows"
+		executionLabelExpression="number of subflows (id = ${subflowId}) running >>> ${executingSubflows.size()} out of ${queueLimit}"
+		devStep="true"
+	>
+		<transition condition="${ executingSubflows.size() &lt; queueLimit }">
+			<targetStepName>ready next csvRow</targetStepName>
+		</transition>
+		<transition condition="${ true }">
+			<targetStepName>queue full</targetStepName>
+		</transition>
+	</noopStep>
+	
+	
+	<delayStep name="queue full"
+		delaySecondsExpression="${ queryPollInterval }"
+		executionLabelExpression="${jsonRows.size()} csvRow remaining | Subflows running: ${executingSubflows.size()}/${queueLimit} | Waiting ${queryPollInterval} seconds."
+		nextStep="query for running subflows"
+	/>
+	
+	
+	<setContextData name="ready next csvRow"
+		targetDataDef="nextJsonRow"
+		valueExpression="${jsonRows.size() &gt; batchSize ? jsonRows.subList(0, batchSize) : jsonRows.subList(0, jsonRows.size()) }"
+		executionLabelExpression="got ${nextJsonRow.size()} csvRow to process"
+		nextStep="remove JSONs from main list"
+		devStep="true"
+	/>
+	
+	
+	<groovyStep name="remove csvRow from main list"
+		resultDataDef="jsonRows"
+		executionLabelExpression="remove ${nextJsonRow.size()} csvRow from the main list"
+		nextStep="process csvRow"
+		devStep="true"
+	>
+		<script>
+			<![CDATA[
+			jsonRows.removeAll(nextJsonRow)
+			return jsonRows
+			]]>
+		</script>
+	</groovyStep>
+	
+	
+	<executeSubflowStep name="process csvRow"
+		executionLabelExpression="Preparing ${nextJsonRow.size()} csvRow. | ${jsonRows.size()} csvRow remaining | Subflows running: ${executingSubflows.size()}/${queueLimit}"
+		targetWorkflowId="${subflowId}"
+		subjectChangePath="${nextJsonRow}"
+		subflowTargetDataDef="input"
+		waitForCompletionExpression="true"
+		nextStep="check for more csvRow" />
+	
+	
+	<noopStep name="check for more csvRow"
+		executionLabelExpression="number of csvRow remaining >>> ${jsonRows.size()}"
+		devStep="true"
+	>
+		<transition condition="${jsonRows.size() &gt; 0}">
+			<targetStepName>query for running subflows</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="no csvRow to process"
+		pctComplete="99"
+		nextStep="end"
+	/>
+	
+	<noopStep name="end" pctComplete="100"/>
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing on the directory"
+		reasonExpression="Workflow already executing on the directory"
+	/>
+	
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- ....... User Input Variables ........ -->
+	<contextDataDef name="fileWithMetaData" label="CSV File Containing Metadata"     dataType="File"   userInput="true"		required="true" />
+	
+	
+	<!-- ....... Processing Variables ........ -->
+	<contextDataDef name="currentExecutions"    dataType="Data Object"  multiple="true"/>
+	<!-- queue loop variables -->
+	<contextDataDef name="jsonRows"             dataType="JSON"         multiple="true"/>
+	<contextDataDef name="nextJsonRow"          dataType="JSON"         multiple="true"/>
+	<contextDataDef name="executingSubflows"    dataType="Data Object"  multiple="true"/>
+	<contextDataDef name="queueLimit"           dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.importCsvMetadata.queueLimit') ?: 11}"/>
+	<contextDataDef name="batchSize"            dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.importCsvMetadata.batchSize') ?: 10}"/>
+	<contextDataDef name="queryPollInterval"    dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.importCsvMetadata.queryPollInterval') ?: 30}"/>
+	<contextDataDef name="subflowId"            dataType="String"       defaultDataExpression="importCsvMetadataSubflow"/>
+	<contextDataDef name="tempDir"			    dataType="String"	    defaultDataExpression="${#sysconfig('filesystem.root.temp')}/${#uuid().toString()}"/>
+	<contextDataDef name="fileWithMetaDataPath" dataType="String"       />
+	<contextDataDef name="result" 	            dataType="String"       />
+	
+	
+</workflow>

@@ -1,0 +1,83 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="queryAssetAndReplace"
+	name="Query Asset and Replace"
+	executionLabelExpression="Query ${assetName} and Replace Placeholder"
+	resultDataDef=""
+	deadlineExpression=""
+	subjectDOClassName=""
+	adminOnly="true"
+	showInUserInterface="false"
+	sdkVersion=""
+>
+	
+	<initialStepName>query placeholder asset</initialStepName>
+	
+	<queryStep name="query placeholder asset"
+		targetDataObjectClass="AssetMaster"
+		resultDataDef="placeholderAsset">
+		<transition condition="${placeholderAsset.size() == 0}">
+			<targetStepName>no asset found</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>set asset master placeholder and get object as file</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+				<criteria>
+					<and>
+						<condition property="metadata.globalID" op="eq">
+							<test value="${globalID}" />
+						</condition>
+					</and>
+				</criteria>
+			]]>
+		</criteria>
+	</queryStep>
+	
+	<setContextData
+		name="set asset master placeholder and get object as file"
+		nextStep="save source into live asset" >
+		<set targetDataDef="assetMasterPlaceholder">${placeholderAsset}</set>
+		<set targetDataDef="fileToIngest">${targetFilePath}</set>
+	</setContextData>
+	
+	
+	<saveAssetStep
+		name="save source into live asset"
+		assetExpression="${assetMasterPlaceholder}"
+		assetNameExpression="${placeholderAsset.name}"
+		contentExpression="${fileToIngest}"
+		contentUseExpression="|SOURCE|MEZZANINE|PROXY|"
+		versionAssetExpression="${false}"
+		nextStep="end"
+	/>
+	
+	
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"    pctComplete="100"/>
+	
+	<!-- fail -->
+	<failWorkflowStep name="no asset found"
+		reasonExpression="No matching Asset found" />
+	
+	
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- ....... Processing Variables ........ -->
+	<contextDataDef name="placeholderAsset"         dataType="Data Object"  />
+	<contextDataDef name="assetMasterPlaceholder"   dataType="Data Object" />
+	<contextDataDef name="fileToIngest"             dataType="File"         />
+	<contextDataDef name="assetName"                dataType="String"       />
+	<contextDataDef name="globalID"                 dataType="String"       />
+	<contextDataDef name="globalGUID"               dataType="String"       />
+	<contextDataDef name="sha1"                     dataType="String"       />
+	<contextDataDef name="targetFilePath"           dataType="String"         />
+
+
+</workflow>

@@ -1,0 +1,190 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xsi:schemaLocation="http://schema.levelsbeyond.com.s3.amazonaws.com/latest/studio.xsd"
+          id="mpRevSynchronizeCaptionOrders"
+          name="Check Rev.com for Completed Caption Orders"
+          executionLabelExpression="Synchronize caption orders via Rev.com"
+          subjectDOClassName=""
+          adminOnly="false"
+          group="REV"
+          showInUserInterface="true"
+          devWorkflow="false"
+          sdkVersion=""
+>
+
+    <initialStepName>query existing execution</initialStepName>
+
+
+    <queryStep name="query existing execution"
+               executionLabelExpression="Checking for existing workflow execution with uuid ${ #this.workflow.uuid }, workflow key ${ #this.workflow.workflowVersion?.workflow?.key }"
+               targetDataObjectClass="WorkflowExecution"
+               resultDataDef="existingExecution"
+    >
+        <transition condition="${ existingExecution == null }">
+            <targetStepName>query pending caption orders</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>workflow is already running</targetStepName>
+        </transition>
+
+        <criteria>
+            <![CDATA[
+				<criteria>
+					<and>
+						<condition property="status" op="eq">
+							<test value="EXECUTING" />
+						</condition>
+						<condition property="workflowVersion.workflow.key" op="eq">
+							<test value="${ #this.workflow.workflowVersion.workflow.key }" />
+						</condition>
+						<condition property="uuid" op="noteq">
+							<test value="${ #this.workflow.uuid }" />
+						</condition>
+					</and>
+				</criteria>
+			]]>
+        </criteria>
+    </queryStep>
+
+    <executeSubflowStep name="query pending caption orders"
+                        executionLabelExpression="Fetching assets with pending caption orders. ${queriedAssets.size()} orders found"
+                        targetWorkflowId="getAssetsByRQL"
+                        resultDataDef="queriedAssets"
+    >
+        <transition condition="${queriedAssets.size() &gt; 0}">
+            <targetStepName>query for running subflows</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>no pending caption orders found</targetStepName>
+        </transition>
+
+        <subflowContextDataMapping parentDataDef="rqlString" subflowDataDef="rqlString"/>
+    </executeSubflowStep>
+
+    <!--queue loop-->
+    <queryStep
+            name="query for running subflows"
+            executionLabelExpression="checking for workflows (with id = ${subflowId} that are not in a finished state ${queriedAssets.size()}"
+            targetDataObjectClass="WorkflowExecution"
+            resultDataDef="executingSubflows"
+            devStep="true"
+    >
+        <transition condition="${queriedAssets.size() &gt; 0 AND (executingSubflows == null or executingSubflows.size() &lt; queueLimit)}">
+            <targetStepName>ready next items</targetStepName>
+        </transition>
+        <transition condition="${queriedAssets.size() == 0}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>queue full</targetStepName>
+        </transition>
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                        <test value="${subflowId}"/>
+                    </condition>
+                    <condition property="status" op="in">
+                        <tests>
+                            <test value="CREATED" />
+                            <test value="QUEUED" />
+                            <test value="EXECUTING" />
+                         </tests>
+                    </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <delayStep
+            name="queue full"
+            executionLabelExpression="${executingSubflows.size()}/${queueLimit} running subflows (id = ${subflowId}). Waiting ${queuePollInterval} seconds. ${queriedAssets.size()} remaining items."
+            delaySecondsExpression="${queuePollInterval}"
+            nextStep="query for running subflows"
+            devStep="true"/>
+
+    <setContextData
+            name="ready next items"
+            executionLabelExpression="got ${currentAssets.size()} items to process"
+            targetDataDef="currentAssets"
+            valueExpression="${queriedAssets.size() &gt; batchSize ? queriedAssets.subList(0, batchSize) : queriedAssets.subList(0, queriedAssets.size()) }"
+            nextStep="remove next assets from main list"
+            devStep="true"/>
+
+    <groovyStep
+            name="remove next assets from main list"
+            executionLabelExpression="remove ${currentAssets.size()} items from the main list"
+            resultDataDef="queriedAssets"
+            nextStep="synchronize caption orders"
+            devStep="true"
+    >
+        <script>
+            <![CDATA[
+        def success = queriedAssets.removeAll(currentAssets)
+        if (success) {
+            return queriedAssets
+        } else {
+            return null
+        }
+        ]]>
+        </script>
+    </groovyStep>
+
+    <executeSubflowStep name="synchronize caption orders"
+                        executionLabelExpression="Synchronizing ${ queriedAssets.size() } caption orders with a maximum of ${batchSize} running at one time."
+                        targetWorkflowId="${subflowId}"
+                        subjectChangePath="${ currentAssets }"
+                        continueOnException="true"
+                        waitForCompletionExpression="false"
+                        nextStep="query for running subflows" />
+
+    <!-- ...................................................... End Steps ...................................................... -->
+    <noopStep name="workflow is already running" />
+
+    <noopStep name="no pending caption orders found" />
+
+    <!-- success -->
+    <noopStep name="end" />
+
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <!-- Processing Variables -->
+    <contextDataDef name="existingExecution" 			dataType="Data Object" />
+
+    <contextDataDef name="queriedAssets" 				dataType="Data Object" 	multiple="true" />
+
+    <contextDataDef name="assetsToExecute" 				dataType="Integer" 		defaultDataExpression="${#sysconfig('marketplace.rev.synchronizeCaptionOrders.queryLimit') ?: 200}"/>
+
+    <!-- batch handling variables -->
+    <contextDataDef name="subflowId" 					dataType="String" 		defaultDataExpression="mpRevSynchronizeCaptionOrder" />
+
+    <contextDataDef name="batchSize"            		dataType="Integer"      defaultDataExpression="${#sysconfig('marketplace.rev.synchronizeCaptionOrders.batchSize') ?: 4}" />
+
+    <contextDataDef name="queuePollInterval"    		dataType="Integer"      defaultDataExpression="${#sysconfig('marketplace.rev.synchronizeCaptionOrders.queuePollInterval') ?: 15}"/>
+    <contextDataDef name="queueLimit"           		dataType="Integer"      defaultDataExpression="${#sysconfig('marketplace.rev.synchronizeCaptionOrders.queueLimit') ?: 10}"/>
+
+    <contextDataDef name="executingSubflows"    		dataType="Data Object"  multiple="true"/>
+
+    <contextDataDef name="currentAssets"        		dataType="Data Object"  multiple="true"/>
+
+    <contextDataDef name="rqlString" 					dataType="String" 		defaultDataExpression="metadata.mpRevOrderStatus = &quot;${#picklistValue('mpRevOrderStatus', 'Order Placed - Pending')}&quot; SIZE ${assetsToExecute}" />
+    
+</workflow>

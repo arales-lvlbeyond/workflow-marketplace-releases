@@ -1,0 +1,59 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="rejectAsset"
+    name="Reject Asset"
+    executionLabelExpression="Reject Asset | Rejecting the asset ${asset.name}"
+    description="This Workflow can be initiated by managers in order for an asset to be rejected for publish"
+    showInUserInterface="true"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${metadata.lifecycleState == #picklistValue('lifecycleState', 'Under Review')}"
+    sdkVersion=""
+    >
+
+    <initialStepName>workflow started notification</initialStepName>
+
+    <createSuccessNotificationStep
+        name="workflow started notification"
+        notificationTypeExpression="success"
+        notificationBodyExpression="Rejecting Asset workflow has started"
+        nextStep="set state back to in progress"
+        />
+
+    <saveDataObjectStep
+        name="set state back to in progress"
+        executionLabelExpression="Setting state on asset back to 'In Progress'"
+        dataObjectExpression="${asset.metadata}"
+        nextStep="send rejected email"
+        >
+        <property name="lifecycleState">${#picklistValue('lifecycleState', 'In Progress')}</property>
+    </saveDataObjectStep>
+
+    <emailStep
+        name="send rejected email"
+        emailAddressesExpression="${distributionEmail},${requesterEmail}"
+        subjectExpression="The asset ${asset.name} has been rejected"
+        nextStep="end"
+        >
+        <body>
+            The asset ${asset.name} has been rejected.
+            Reason: ${rejectionReason}
+            ID: ${asset.id}
+            URL: ${reachUrl}/#/assets?focusedAssetId=${asset.id}&amp;focusedAssetType=${assetType}
+        </body>
+    </emailStep>
+    
+    <noopStep name="end"/>
+
+    <!-- Input -->
+    <contextDataDef name="asset" dataType="Data Object" defaultDataExpression="${subject}"/>
+    <contextDataDef name="rejectionReason" dataType="String" userInput="true"/>
+
+    <!-- Internal -->
+    <contextDataDef name="requesterEmail" dataType="String" defaultDataExpression="${asset.metadata.reviewRequesterEmail}"/>
+    <contextDataDef name="distributionEmail" dataType="String" defaultDataExpression="${#sysconfig('workflow.review.email')}"/>
+    <contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reach.engine.url')}"/>
+    <contextDataDef name="assetType" dataType="String" defaultDataExpression="${asset.assetType.toLowerCase()}"/>
+    
+</workflow>

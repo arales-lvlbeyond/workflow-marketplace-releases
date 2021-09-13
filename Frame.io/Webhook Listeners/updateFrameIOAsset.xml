@@ -1,0 +1,124 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="updateFrameIOAsset"
+	name="Update Frame.io Asset"
+	executionLabelExpression="Update Frame.io Asset"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	hasDownload="false"
+>
+	
+	<initialStepName>get asset</initialStepName>
+	
+	<!-- ................................................... Get asset .................................................... -->
+	<queryStep name="get asset"
+		executionLabelExpression="Check for existing asset with Frame.io ID: ${resourceId}"
+		targetDataObjectClass="AssetMaster"
+		resultDataDef="asset"
+	>
+		<transition condition="${asset != null}">
+			<targetStepName>check frameio asset status value</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>no asset found</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="metadata.frameioID" op="eq">
+                            <test value="${resourceId}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<noopStep name="check frameio asset status value"
+		executionLabelExpression="Check Frame.io asset status value"
+		devStep="true"
+		>
+		<transition condition="${type == 'asset.label.updated' AND frameioStatusFieldValue == 'In Review'}">
+			<targetStepName>update frameioStatusFieldName</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>update asset metadata</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<nimbus:setMetadataValueStep name="update frameioStatusFieldName"
+		executionLabelExpression="Update asset Frame.io Status value"
+		targetExpression="${asset}"
+		propertyNameExpression="${frameioStatusFieldName}"
+		valueExpression="${#picklistValue(frameioStatusFieldName, frameioStatusFieldValue)}"
+		nextStep="end"/>
+	
+	
+	<!-- ................................................... Update asset .................................................... -->
+	<executeSubflowStep name="update asset metadata"
+		targetWorkflowId="_saveAnyAssetMetadata"
+		executionLabelExpression="Update asset metadata"
+		subjectChangePath="${asset}"
+		subflowTargetDataDef="asset"
+		nextStep="end"
+		>
+		<subflowContextDataMapping parentDataDef="jsonMetadata" subflowDataDef="jsonMetadata"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<!-- failure -->
+	<noopStep name="no asset found" nextStep="end"/>
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="projectId" dataType="String"/>
+	<contextDataDef name="resourceId" dataType="String"/>
+	<contextDataDef name="resourceType" dataType="String"/>
+	<contextDataDef name="teamId" dataType="String"/>
+	<contextDataDef name="type" dataType="String"/>
+	<contextDataDef name="userId" dataType="String"/>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="asset" dataType="Data Object"/>
+	<contextDataDef name="frameioStatusFieldName" dataType="String" defaultDataExpression="${#sysconfig('workflow.field.names.frameioStatus') ?: 'frameioStatus'}"/>
+	<contextDataDef name="frameioStatusFieldValue" dataType="String"/>
+	<contextDataDef name="jsonMetadata" dataType="JSON">
+		<defaultDataExpression>
+			<![CDATA[
+			{
+				${frameioStatusFieldName} : "${frameioStatusFieldValue}",
+				frameIOParentID : "",
+				frameioID : "",
+				frameioTeam : "",
+				frameioURL : ""
+			}
+			]]>
+		</defaultDataExpression>
+	</contextDataDef>
+	
+</workflow>

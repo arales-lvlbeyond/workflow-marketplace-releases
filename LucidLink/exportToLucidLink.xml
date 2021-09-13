@@ -1,0 +1,154 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="exportToLucidLink"
+	name="Export file"
+	adminOnly="true"
+	executionLabelExpression="Lucid Link - Export file - ${format} - ${subject}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Lucid Link"
+	sdkVersion=""
+>
+
+	<initialStepName>is workflow executing</initialStepName>
+	
+	<queryStep name="is workflow executing"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Check to see if this workflow is currently executing"
+	>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>check file</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="eq">
+                            <test value="${T(org.apache.commons.lang.StringEscapeUtils).escapeXml(#this.workflow.executionLabel)}"/>
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<noopStep name="check file"
+		executionLabelExpression="Checking file to export - &quot;${assetContentFile.absolutePath}&quot;">
+		<transition condition="${assetContentFile == null}">
+			<targetStepName>file format does not exist</targetStepName>
+		</transition>
+		<transition condition="${#fileExists(assetContentFile)}">
+			<targetStepName>copy file</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>file does not exist</targetStepName>
+		</transition>
+	</noopStep>
+ 
+	<copyFileStep name="copy file"
+		sourceFileExpression="${assetContentFile.absolutePath}"
+		targetDirectoryExpression="${#filepath(destinationFilePath)}"
+		targetFilenameExpression="${#filename(destinationFilePath)}"
+		overwriteExisting="true"
+		createTargetDirectoryFlag="true"
+		resultDataDef="destinationFile"
+		nextStep="update metadata"/>
+	
+	<!-- Value expression below eliminates duplicates and returns items as a list by concating the original list stream with a stream of the file path, -->
+	<!-- then creating a new set which will eliminate the duplicates and then collecting the stream of the set as a list.  Requires java 8 or newer. -->
+	<nimbus:setMetadataValueStep name="update metadata"
+		targetExpression="${assetMaster}"
+		propertyNameExpression="lucidLinkPath"
+		valueExpression="${#joinElements(new java.util.HashSet(T(java.util.stream.Stream).concat(lucidLinkPaths.stream(), T(java.util.stream.Stream).of(destinationFile.absolutePath.toString())).collect(T(java.util.stream.Collectors).toList())).stream().collect(T(java.util.stream.Collectors).toList()),'|')}"
+		nextStep="update expiration date"/>
+	
+	<nimbus:setMetadataValueStep name="update expiration date"
+		targetExpression="${assetMaster}"
+		propertyNameExpression="lucidLinkExpiration"
+		valueExpression="${#addDays(#newDate(), lucidLinkExpirationDays)}"
+		nextStep="end"/>
+	
+    
+    <!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- fail -->
+	<noopStep name="workflow is running"
+		executionLabelExpression="Workflow already executing"
+	/>
+	
+	<createFailureNotificationStep name="file format does not exist"
+		notificationTypeExpression="warning"
+		notificationBodyExpression="A ${format} file for asset &quot;${subject.name}&quot; not found.  Skipping."/>
+	
+	<createFailureNotificationStep name="file does not exist"
+		notificationTypeExpression="warning"
+		notificationBodyExpression="file &quot;${assetContentFile.absolutePath}&quot; from asset &quot;${subject.name}&quot; was not found.  Skipping."/>
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="clip" dataType="Data Object" defaultDataExpression="${subject.getClass().getName().indexOf('Clip') > -1 ? subject : null}" />
+	<contextDataDef name="assetMaster" dataType="Data Object" defaultDataExpression="${clip?.assetMaster ?: subject}" />
+	<contextDataDef name="format"       dataType="String"   userInput="true"    label="Choose File to Send:"    defaultDataExpression="proxy" displayIndex="1">
+		<picklist>
+			<picklistItem value="source" label="Source"/>
+			<picklistItem value="mezzanine" label="Mezzanine"/>
+			<picklistItem value="proxy" label="Proxy"/>
+		</picklist>
+	</contextDataDef>
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="assetContent" dataType="Data Object" defaultDataExpression="${#assetService().getAssetContent(assetMaster, T(com.routeto1.asset.AssetContentUse).forName(format)) ?: (fallBackToSource and format != 'source') ? #assetService().getAssetContent(assetMaster, T(com.routeto1.asset.AssetContentUse).forName('source')) : null}"/>
+	<contextDataDef name="assetContentFile" dataType="File" defaultDataExpression="${assetContent?.file}" />
+	<contextDataDef name="lucidLinkBasePath" dataType="String" defaultDataExpression="${#sysconfig('marketplace.lucidlink.basepath') ?: root.filesystem.lucidlink}" />
+	<contextDataDef name="lucidLinkExpirationDays" dataType="Integer" defaultDataExpression="${#sysconfig('marketplace.lucidlink.expirationDays') ?: '7'}"/>
+	<contextDataDef name="lucidLinkPathMapName" dataType="String" defaultDataExpression="${#sysconfig('marketplace.lucidlink.pathMapName') ?: 'LucidLink'}" />
+	<contextDataDef name="destinationFilePath"     dataType="File"       defaultDataExpression="${#mapPath(assetContentFile, lucidLinkPathMapName)}"/>
+	<contextDataDef name="destinationFile"     dataType="File"/>
+	<contextDataDef name="lucidLinkPaths" dataType="String" multiple="true"
+		defaultDataExpression="${#splitString(assetMaster.metadata.lucidLinkPath, '|', false, false)}"/>
+	<contextDataDef name="lucidLinkExpiration" dataType="Date/Time" defaultDataExpression="${assetMaster.metadata?.lucidLinkExpiration}" />
+	<contextDataDef name="currentExecutions" dataType="Data Object" multiple="true"/>
+	<contextDataDef name="fallBackToSource" dataType="Boolean" defaultDataExpression="true" />
+ 
+</workflow>

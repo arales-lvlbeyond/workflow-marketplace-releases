@@ -1,0 +1,139 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="createProjectCollection"
+	name="Create Project Collection"
+	group="Frame.io"
+	executionLabelExpression="Create Project Collection | ${projectName}"
+	subjectDOClassName=""
+	showInUserInterface="true"
+	sdkVersion=""
+	hasDownload="false"
+>
+
+	<initialStepName>check for existing collection</initialStepName>
+	
+
+	<!-- ................................................... Check or create collection .................................................... -->
+	<queryStep name="check for existing collection"
+		executionLabelExpression="Check for existing Collection: ${projectName}"
+		targetDataObjectClass="AssetCollection"
+		resultDataDef="collection"
+	>
+		<transition condition="${collection == null}">
+			<targetStepName>create collection</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>create frame.io project</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="${propertyName}" op="eq">
+                            <test value="${projectName}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<saveDataObjectStep name="create collection"
+		executionLabelExpression="Creating collection: ${projectName}"
+		targetDataObjectClass="AssetCollection"
+		resultDataDef="collection"
+		nextStep="create frame.io project"
+	>
+		<property name="name">${projectName}</property>
+	</saveDataObjectStep>
+	
+	<!-- ................................................... Create Frame.io Project .................................................... -->
+	<executeSubflowStep name="create frame.io project"
+		targetWorkflowId="createFrameIOProject"
+		executionLabelExpression="Get or Create Frame.io project | Team: ${team} | Private? ${isPrivate}"
+		resultDataDef="frameioProjectResponseJson"
+		nextStep="get project url"
+		>
+		<subflowContextDataMapping parentDataDef="projectName" subflowDataDef="projectName"/>
+		<subflowContextDataMapping parentDataDef="collection" subflowDataDef="collection"/>
+		<subflowContextDataMapping parentDataDef="team" subflowDataDef="team"/>
+		<subflowContextDataMapping parentDataDef="isPrivate" subflowDataDef="isPrivate"/>
+	</executeSubflowStep>
+	
+	<executeSubflowStep name="get project url"
+		targetWorkflowId="getFrameioProjectUrl"
+		executionLabelExpression="Get Frame.io Project URL | Project root asset ID: ${projectRootAssetId}"
+		resultDataDef="projectUrl"
+		subjectChangePath="${projectRootAssetId}"
+		subflowTargetDataDef="projectRootAssetId"
+		nextStep="save collection metadata"
+		/>
+	
+	<!-- ................................................... Associate Collection metadata and categories .................................................... -->
+	<executeSubflowStep name="save collection metadata"
+		targetWorkflowId="_saveAnyAssetMetadata"
+		executionLabelExpression="Saving form metadata to ${collection.name}"
+		subjectChangePath="${collection}"
+		subflowTargetDataDef="asset"
+		nextStep="save frameio metadata"
+	>
+		<subflowContextDataMapping parentDataDef="metadataForm" subflowDataDef="metadataForm"/>
+		<subflowContextDataMapping parentDataDef="metadataFormType" subflowDataDef="metadataFormType"/>
+	</executeSubflowStep>
+	
+	<saveDataObjectStep name="save frameio metadata"
+		executionLabelExpression="Saving Frame.io metadata to ${collection.name}"
+		dataObjectExpression="${collection.metadata}"
+		nextStep="end"
+	>
+		<property name="frameIOParentID">${projectRootAssetId}</property>
+		<property name="frameioURL">{&quot;title&quot;: &quot;${projectUrl}&quot;, &quot;url&quot;: &quot;${projectUrl}&quot;}</property>
+	</saveDataObjectStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="projectName" dataType="String" label="Project Name" userInput="true" required="true" displayIndex="1"/>
+	<contextDataDef name="team" label="Frame.io Team" dataType="String" userInput="true" required="true" displayIndex="2">
+		<picklist>
+			<metadataProperty>frameioTeam</metadataProperty>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="isPrivate" dataType="Boolean" label="Private?" userInput="false" defaultDataExpression="false" displayIndex="3"/>
+	<contextDataDef name="metadataForm" label="Metadata Form" dataType="MetadataForm" userInput="true" required="false" displayIndex="4" />
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="metadataFormType" dataType="String" defaultDataExpression="access"/>
+	<contextDataDef name="collection" dataType="Data Object"/>
+	<contextDataDef name="propertyName" dataType="String" defaultDataExpression="${#sysconfig('workflow.frameio.project.name') ?: 'name'}"/>
+	<contextDataDef name="frameioProjectResponseJson" dataType="JSON"/>
+	<contextDataDef name="projectRootAssetId" dataType="String" defaultDataExpression="${frameioProjectResponseJson.root_asset_id}"/>
+	<contextDataDef name="projectId" dataType="String" defaultDataExpression="${frameioProjectResponseJson.id}"/>
+	<contextDataDef name="projectUrl" dataType="String"/>
+	
+</workflow>

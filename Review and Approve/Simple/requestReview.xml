@@ -1,0 +1,62 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="requestReview"
+    name="Request Review"
+    executionLabelExpression="Request Review | Requesting review on ${asset.name}"
+    description="This Workflow can be initiated by users and editors to request review by a manager in order for an asset to be approved for publish"
+    showInUserInterface="true"
+    subjectDOClassName="AssetMaster"
+    subjectQualifierExpression="${metadata.lifecycleState == #picklistValue('lifecycleState','Raw') or metadata.lifecycleState == #picklistValue('lifecycleState','In Progress')}"
+    sdkVersion=""
+    >
+
+    <initialStepName>workflow started notification</initialStepName>
+    
+
+    <createSuccessNotificationStep
+        name="workflow started notification"
+        notificationTypeExpression="success"
+        notificationBodyExpression="Request Review workflow has started"
+        nextStep="send review request email"
+        />
+    
+    <emailStep
+        name="send review request email"
+        emailAddressesExpression="${distributionEmail}"
+        subjectExpression="Review is being requested for the asset ${asset.name}"
+        nextStep="set status to in review"
+        >
+        <body>
+            Review is being requested for the asset ${asset.name}
+            ID: ${asset.id}
+            Requester: ${startedByUser}
+            URL: ${reachUrl}/#/assets?focusedAssetId=${asset.id}&amp;focusedAssetType=${assetType}
+        </body>
+    </emailStep>
+    
+    <saveDataObjectStep
+        name="set status to in review"
+        executionLabelExpression="Setting status on asset to 'Under Review'"
+        dataObjectExpression="${asset.metadata}"
+        nextStep="end"
+    >
+        <property name="lifecycleState">${#picklistValue('lifecycleState', 'Under Review')}</property>
+        <property name="reviewRequesterEmail">${startedByEmail}</property>
+    </saveDataObjectStep>
+
+    <noopStep name="end"/>
+    
+    <!-- .......................................Context Data Defs............................................. -->
+    <!-- Input -->
+    <contextDataDef name="asset" dataType="Data Object" defaultDataExpression="${subject}"/>
+
+    <!-- Internal -->
+    <contextDataDef name="distributionEmail" dataType="String" defaultDataExpression="${#sysconfig('workflow.review.email')}"/>
+    <contextDataDef name="startedByUser" dataType="String" defaultDataExpression="${#this.startedBy.userName}"/>
+    <contextDataDef name="startedByEmail" dataType="String" defaultDataExpression="${#this.startedBy.emailAddress}"/>
+    <contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reach.engine.url')}"/>
+    <contextDataDef name="assetType" dataType="String" defaultDataExpression="${asset.assetType.toLowerCase()}"/>
+    
+</workflow>

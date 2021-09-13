@@ -1,0 +1,75 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2016 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="existingSha1AssignSubflow"
+	name="Existing Sha1 Assign -Subflow"
+	description=""
+	executionLabelExpression=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	resultDataDef="sha1"
+	sdkVersion="5.4">
+	
+	<initialStepName>get sha1</initialStepName>
+	
+	<runCommandStep name="get sha1"
+		executablePathExpression="/usr/bin/sha1sum"
+		argsExpression="${asset.originalContent.file.absolutePath}"
+		executionLabelExpression="Getting sha1"
+		devStep="true"
+		stdoutDataDef="longSha1" >
+		<transition condition="${longSha1 == null}">
+			<targetStepName>sha1 failed</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>set sha1</targetStepName>
+		</transition>
+	</runCommandStep>
+	
+	<setContextData name="set sha1"
+		executionLabelExpression="Splitting Sha1 from response"
+		devStep="true"
+		targetDataDef="sha1"
+		valueExpression="${longSha1.substring(0,40)}"
+		nextStep="save sha1 to metadata" />
+	
+	<saveDataObjectStep name="save sha1 to metadata"
+		devStep="true"
+		dataObjectExpression="${asset.metadata}"
+		continueOnException="true"
+		nextStep="end" >
+		<property name="sha1">${sha1}</property>
+	</saveDataObjectStep>
+	
+	
+	
+	<!-- ........................................... Ending Steps .......................................... -->
+	<noopStep name="end" pctComplete="100"/>
+	<noopStep name="sha1 failed"        />
+	
+	
+	<!-- ........................................ Context Data Defs ........................................ -->
+	<contextDataDef name="asset"                dataType="Data Object"      />
+	<contextDataDef name="longSha1"             dataType="String"           />
+	<contextDataDef name="sha1"                 dataType="String"           />
+
+
+</workflow>

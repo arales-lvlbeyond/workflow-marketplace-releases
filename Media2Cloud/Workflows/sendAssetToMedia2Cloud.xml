@@ -1,0 +1,53 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="sendAssetToMedia2Cloud"
+	name="Send Asset to Media2Cloud"
+	executionLabelExpression="Send Asset to Media2Cloud | ${subject.name}"
+	subjectDOClassName="VideoAssetMaster"
+	showInUserInterface="true"
+	sdkVersion=""
+	hasDownload="false"
+>
+
+	<initialStepName>copy asset to s3</initialStepName>
+
+
+	<executeSubflowStep name="copy asset to s3"
+		targetWorkflowId="m2cAssetIngest"
+		nextStep="end"
+	>
+		
+		<subflowContextDataMapping parentDataDef="fileToIngest" subflowDataDef="fileToIngest"/>
+	</executeSubflowStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="fileToIngest" dataType="File" defaultDataExpression="${subject.originalContent.file}" />
+	
+</workflow>

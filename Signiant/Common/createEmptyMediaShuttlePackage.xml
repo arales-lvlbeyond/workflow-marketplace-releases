@@ -1,0 +1,108 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="createEmptyMediaShuttlePackage"
+    name="Create Empty Media Shuttle Package"
+    executionLabelExpression="Creating Empty Media Shuttle Package"
+    subjectDOClassName=""
+    showInUserInterface="false"
+    sdkVersion=""
+    resultDataDef="portalAndPackage"
+>
+
+    <initialStepName>get media shuttle portal</initialStepName>
+
+    <!--get portal id-->
+    <submitHttpStep name="get media shuttle portal"
+        urlExpression="${baseMediaShuttlePortalsUrl}/portals?url=${mediaShuttlePortalName}"
+        requestMethodExpression="GET"
+        responseCodeDataDef="getPortalIdResponseCode"
+        responsePayloadDataDef="getPortalIdResponse"
+        executionLabelExpression="Requesting Portal ID for Portal: ${mediaShuttlePortalName}"
+        pctComplete="15"
+        >
+        <transition condition="${getPortalIdResponseCode.startsWith('2')}">
+            <targetStepName>set portalId</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to retrieve portal</targetStepName>
+        </transition>
+
+        <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+    </submitHttpStep>
+
+    <setContextData name="set portalId"
+        targetDataDef="portalAndPackage"
+        valueExpression="${portalAndPackage.put('portalId', getPortalIdResponse.get('items').get(0).get('id').asText())}"
+        executionLabelExpression="Portal Id: ${portalAndPackage.get('portalId').asText()}"
+        nextStep="create package"/>
+
+    <!--create package-->
+    <submitHttpStep name="create package"
+        urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalAndPackage.get('portalId').asText()}/packages"
+        requestMethodExpression="POST"
+        responseCodeDataDef="createPackageResponseCode"
+        responsePayloadDataDef="createPackageResponse"
+        executionLabelExpression="Creating new empty package"
+        pctComplete="15"
+        >
+        <transition condition="${createPackageResponseCode.startsWith('2')}">
+            <targetStepName>set packageId</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to create package</targetStepName>
+        </transition>
+
+        <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+    </submitHttpStep>
+
+    <setContextData name="set packageId"
+        targetDataDef="portalAndPackage"
+        valueExpression="${portalAndPackage.put('packageId',createPackageResponse.get('id').asText())}"
+        executionLabelExpression="Package Id: ${portalAndPackage.get('packageId').asText()}"
+        nextStep="end"/>
+
+    <failWorkflowStep name="failed to retrieve portal"
+        executionLabelExpression="Failed to retrieve portal, received code ${getPortalIdResponseCode}"
+        reasonExpression="Response: ${getPortalIdResponse.asText()}"/>
+
+    <failWorkflowStep name="failed to create package"
+        executionLabelExpression="Failed to create package, received code ${createPackageResponseCode}"
+        reasonExpression="Response: ${createPackageResponse.asText()}"/>
+
+    <noopStep name="end"/>
+
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <contextDataDef name="portalAndPackage" dataType="JSON" defaultDataExpression="{}"/>
+
+    <!--API responses and codes-->
+    <contextDataDef name="getPortalIdResponseCode" dataType="String"/>
+    <contextDataDef name="getPortalIdResponse" dataType="JSON"/>
+    <contextDataDef name="createPackageResponseCode" dataType="String"/>
+    <contextDataDef name="createPackageResponse" dataType="JSON"/>
+
+    <!--defaults-->
+    <contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" />
+    <contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String"/>
+    <contextDataDef name="mediaShuttlePortalName" dataType="String"  defaultDataExpression="${#sysconfig('media.shuttle.portal.name')}" />
+</workflow>

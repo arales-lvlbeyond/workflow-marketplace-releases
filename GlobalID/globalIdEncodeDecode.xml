@@ -1,0 +1,237 @@
+<!--
+    ~ Levels Beyond CONFIDENTIAL
+    ~
+    ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+    ~ All Rights Reserved.
+    ~
+    ~ NOTICE:  All information contained herein is, and remains
+    ~ the property of Levels Beyond Incorporated and its suppliers,
+    ~ if any.  The intellectual and technical concepts contained
+    ~ herein are proprietary to Levels Beyond Incorporated
+    ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+    ~ patents in process, and are protected by trade secret or copyright law.
+    ~ Dissemination of this information or reproduction of this material
+    ~ is unlawful and strictly forbidden unless prior written permission is obtained
+    ~ from Levels Beyond Incorporated.
+    -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+          id="globalIdEncodeDecode"
+          name="Encode Global GUID"
+          executionLabelExpression="Encode Global GUID"
+          subjectDOClassName=""
+          adminOnly="true"
+          showInUserInterface="false"
+          resultDataDef="globalId"
+          sdkVersion="">
+    <initialStepName>encode decode</initialStepName>
+    <groovyStep name="encode decode"
+                resultDataDef="globalId"
+                nextStep="fin">
+        <script>
+            <![CDATA[
+            import groovy.json.JsonSlurper
+            import groovy.json.JsonOutput
+            import java.nio.ByteBuffer
+            import java.nio.charset.StandardCharsets
+            import java.util.UUID
+            import java.util.Arrays
+
+            class ByteUtils {
+                private static ByteBuffer buffer = ByteBuffer.allocate(8);
+                private static byte zero = 0
+
+                public static byte[] longToBytes(long x) {
+                    buffer.putLong(0, x)
+                    return buffer.array()
+                }
+
+                public static long bytesToLong(byte[] bytes) {
+                    buffer.put(bytes, 0, bytes.length)
+                    buffer.flip()
+                    return buffer.getLong()
+                }
+
+                public static byte[] stringToBytes(String s) {
+                    ByteBuffer sb = ByteBuffer.allocate(s.length())
+                    Arrays.fill(sb.rewind().array(), zero)
+                    return sb.put(s.getBytes(StandardCharsets.ISO_8859_1), 0, s.length()).rewind().array()
+                }
+
+                public static String bytesToString(byte[] bytes) {
+                    return new String(bytes, StandardCharsets.ISO_8859_1).replaceAll("\u0000", "")
+                }
+
+                public static byte rotateRight(byte bits, int shift) {
+                    return (byte) (((bits & 0xff) >>> shift) | ((bits & 0xff) << (8 - shift)))
+                }
+
+                public static byte rotateLeft(byte bits, int shift) {
+                    return (byte) (((bits & 0xff) << shift) | ((bits & 0xff) >>> (8 - shift)))
+                }
+
+                public static byte getRotl(ByteBuffer b, int i) {
+                    return ByteUtils.rotateLeft(b.get(i), i % 8)
+                }
+            }
+
+            class TwoToneCrypt {
+                private static byte zero = 0
+
+                private def tt
+
+                public TwoToneCrypt(def cryptKeys) {
+                    tt = null
+                    if (cryptKeys != null) {
+                        JsonSlurper json = new JsonSlurper().parseText(cryptKeys.toString())
+                        if (json.size() == 4 && json.collect { it.keySet().contains('map') && it.keySet().contains('key') }[0]) {
+                            tt = json
+                        }
+                    }
+                    if (tt == null) {
+                        // Fallback to a default key for testing.
+                        tt = [[map: [4, 7, 10, 12, 0, 5, 6, 1, 3, 2, 8, 9, 11, 13, 14], key: [21, 249, 135, 237, 0, 194, 179, 132, 50, 116, 32, 66, 41, 86, 242]], [map: [7, 6, 12, 14, 11, 8, 4, 5, 1, 13, 0, 3, 2, 9, 10], key: [84,95,7,229,231,142,67,165,16,80,51,248,5,160,11]], [map: [5,1,4,3,14,9,2,6,7,12,8,0,11,13,10], key:[145,133,153,245,11,70,20,35,208,237,148,81,120,78,205]],[map:[12,14,8,2,7,5,10,6,4,11,1,13,9,0,3], key:[127,233,82,29,4,164,152,239,215,169,217,78,43,157,161]]]
+                    }
+                }
+
+                public void put(ByteBuffer b, byte v, int c, int i) {
+                    b.put(tt[c]['map'][i], (byte) (v ^ tt[c]['key'][i]))
+                }
+
+                public byte get(ByteBuffer b, int c, int i) {
+                    return (byte) (b.get(tt[c]['map'][i]) ^ tt[c]['key'][i])
+                }
+
+                static int getCidx(byte[] v) {
+                    int accum = 0
+                    v.each { b ->
+                        accum += Math.abs(b)
+                    }
+                    int cidx = accum % 4
+                    return cidx
+                }
+
+                static int getCidx(long id, String node) {
+                    ByteBuffer abuf = ByteBuffer.allocate(15)
+                    Arrays.fill(abuf.rewind().array(), zero)
+                    abuf.putLong(id)
+                    abuf.put(ByteUtils.stringToBytes(node), 0, Math.min(node.length(), 15 - 8))
+                    return getCidx(abuf.rewind().array())
+                }
+
+                byte[] enc(byte[] v, int cidx) {
+                    ByteBuffer abuf = ByteBuffer.allocate(15)
+                    ByteBuffer bbuf = ByteBuffer.allocate(15)
+                    ByteBuffer cbuf = ByteBuffer.allocate(15)
+
+                    abuf.put(v)
+
+                    for (int i = 0; i < 15; i++) {
+                        byte val = i < 7 ? abuf.get(i) ^ abuf.get(14 - i) : i < 14 ? abuf.get(i) ^ bbuf.get(i - 7) : abuf.get(i)
+                        bbuf.put(i, ByteUtils.rotateRight(val, i % 8))
+                        put(cbuf, bbuf.get(i), cidx, i)
+                    }
+                    return cbuf.rewind().array()
+                }
+
+                byte[] dec(byte[] v, cidx) {
+                    ByteBuffer abuf = ByteBuffer.allocate(15)
+                    ByteBuffer bbuf = ByteBuffer.allocate(15)
+                    ByteBuffer cbuf = ByteBuffer.allocate(15)
+                    cbuf.put(v, 0, 15)
+                    for (int i = 0; i < 15; i++) {
+                        bbuf.put(i, get(cbuf, cidx, i))
+                    }
+
+                    for (int i = 14; i > -1; i--) {
+                        byte val = i < 7 ? ByteUtils.getRotl(bbuf, i) ^ abuf.get(14 - i) : i < 14 ? ByteUtils.getRotl(bbuf, i) ^ bbuf.get(i - 7) : ByteUtils.getRotl(bbuf, i)
+                        abuf.put(i, val)
+                    }
+                    return abuf.rewind().array()
+                }
+
+                String generateUuid(long id, String node, String userData) {
+                    def json = new JsonSlurper().parseText('{"id":0,"node":"", "uuid":""}')
+                    json.id = id
+                    json.node = node
+                    ByteBuffer abuf = ByteBuffer.allocate(15)
+                    ByteBuffer ubuf = ByteBuffer.allocate(16)
+                    Arrays.fill(abuf.rewind().array(), zero)
+                    Arrays.fill(ubuf.rewind().array(), zero)
+                    abuf.putLong(id)
+                    String nodeStr = node
+                    if (userData != null && userData.length() > 0) {
+                        nodeStr += '|' + userData
+                    }
+                    abuf.put(ByteUtils.stringToBytes(nodeStr))
+                    byte cidx = (byte) getCidx(abuf.rewind().array())
+                    abuf.rewind().put(enc(abuf.rewind().array(), cidx))
+                    ubuf.put(abuf.rewind().array())
+                    ubuf.put((byte) ((abuf.get(6) & 0xf0) | ((abuf.get(8) & 0xf0) >>> 4)))
+                    ubuf.put(6, (byte) ((abuf.get(6) & 0x0f) | 48))
+                    ubuf.put(8, (byte) ((abuf.get(8) & 0x0f) | 128 | (cidx << 4)))
+                    ubuf.rewind()
+                    long msb = ubuf.getLong()
+                    long lsb = ubuf.getLong()
+                    UUID uuid = new UUID(msb, lsb)
+                    json.uuid = uuid.toString()
+                    String rval = JsonOutput.toJson(json)
+                    return rval
+                }
+
+                String decodeUuid(String uuidStr) {
+                    UUID uuid = UUID.fromString(uuidStr)
+                    def json = new JsonSlurper().parseText('{"id":0,"node":"", "uuid":""}')
+                    json.uuid = uuidStr
+                    ByteBuffer ubuf = ByteBuffer.allocate(16)
+                    ubuf.putLong(uuid.getMostSignificantBits()).putLong(uuid.getLeastSignificantBits()).rewind()
+                    int cidx = (ubuf.get(8) & 0x30) >>> 4
+                    ubuf.put(8, (byte) ((ubuf.get(8) & 0x0f) | ((ubuf.get(15) & 0x0f) << 4)))
+                    ubuf.put(6, (byte) ((ubuf.get(6) & 0x0f) | (ubuf.get(15) & 0xf0)))
+                    ByteBuffer abuf = ByteBuffer.allocate(15)
+                    Arrays.fill(abuf.rewind().array(), zero)
+                    abuf.rewind().put(dec(ubuf.rewind().array(), cidx))
+                    json.id = abuf.rewind().getLong()
+                    ByteBuffer bbuf = ByteBuffer.allocate(7);
+                    bbuf.put(abuf.array(), 8, 7)
+                    String nodeStr = ByteUtils.bytesToString(bbuf.rewind().array())
+                    if (nodeStr.contains('|')) {
+                        String[] tmp = nodeStr.split('\\|',2)
+                        json.node = tmp[0]
+                        json.userData = tmp[1]
+                    }
+                    else {
+                        json.node = nodeStr
+                    }
+                    String rval = JsonOutput.toJson(json)
+                    return rval
+                }
+            }
+
+            TwoToneCrypt ttc = new TwoToneCrypt(cryptKeys)
+
+            if (uuid  == null && id != null && node != null) {
+                return ttc.generateUuid(id, node, userData)
+            }
+            else if (uuid != null) {
+                return ttc.decodeUuid(uuid)
+            }
+            return null
+            ]]>
+        </script>
+    </groovyStep>
+
+    <noopStep name="fin" />
+
+
+    <contextDataDef name="uuid" dataType="String" />
+    <contextDataDef name="id" dataType="Integer" />
+    <!-- Total number of characters in userData and node can not exceed 6 characters total -->
+    <contextDataDef name="node" dataType="String" />
+    <contextDataDef name="userData" dataType="String" />
+    <contextDataDef name="globalId" dataType="JSON" />
+    <contextDataDef name="cryptKeys" dataType="JSON" defaultDataExpression="${#sysconfig('workflow.globalId.template')?:'[]'}" />
+
+</workflow>

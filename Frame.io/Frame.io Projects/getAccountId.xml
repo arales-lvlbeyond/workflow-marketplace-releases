@@ -1,0 +1,125 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+	id="getAccountId"
+	name="Get Account ID"
+	executionLabelExpression="Get Account ID"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	group="Frame.io"
+	sdkVersion=""
+	hasDownload="false"
+	resultDataDef="accountId"
+>
+	
+	<initialStepName>check inputs</initialStepName>
+	
+	<noopStep name="check inputs"   devStep="true" >
+		<transition condition="${team_id != null}">
+			<targetStepName>get account id by team</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Get account ID</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<submitHttpStep name="get account id by team"
+		urlExpression="${frameioURL}/teams/${team_id}"
+		requestMethodExpression="GET"
+		responseCodeDataDef="frameioAccountResponseCode"
+		responsePayloadDataDef="frameioAccountResponseJson"
+	>
+		<transition condition="${frameioAccountResponseCode.toString().startsWith('2')}">
+			<targetStepName>set team account id</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Frame.io HTTP Error</targetStepName>
+		</transition>
+		
+		<requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+	</submitHttpStep>
+	
+	<setContextData name="set team account id"
+		executionLabelExpression="Account ID: ${accountId}"
+		targetDataDef="accountId"
+		valueExpression="${frameioAccountResponseJson.get('account_id').asText()}"
+		nextStep="end"
+	/>
+	
+	<runCommandStep name="Get account ID"
+		executablePathExpression="/usr/bin/curl"
+		stdoutDataDef="frameioAccountResponseJson"
+		resultCodeDataDef="frameioAccountResponseCode"
+	>
+		<transition condition="${ frameioAccountResponseJson == null OR frameioAccountResponseJson.isNull() }">
+			<targetStepName>Frame.io JSON Response Error</targetStepName>
+		</transition>
+		<transition condition="${ frameioAccountResponseCode != 0 }">
+			<targetStepName>Frame.io HTTP Error</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>Set account ID</targetStepName>
+		</transition>
+		
+		<arg>--request</arg>
+		<arg>GET</arg>
+		<arg>--url</arg>
+		<arg>${frameioURL}/accounts</arg>
+		<arg>--header</arg>
+		<arg>Authorization: Bearer ${frameBearer}</arg>
+		<arg>--header</arg>
+		<arg>Content-Type: application/json</arg>
+	</runCommandStep>
+	
+	<setContextData name="Set account ID"
+		devStep="true"
+		executionLabelExpression="Account ID: ${frameioAccountResponseJson.owner.account_id}"
+		targetDataDef="accountId"
+		valueExpression="${frameioAccountResponseJson.owner.account_id}"
+		nextStep="end" />
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<failWorkflowStep name="Frame.io JSON Response Error"
+		reasonExpression="Error Retrieving Frame.io JSON Response"/>
+	
+	<failWorkflowStep name="Frame.io HTTP Error"
+		reasonExpression="Error contacting Frame.io. Error code: ${frameioAccountResponseCode}"/>
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="frameioURL" dataType="String" />
+	<contextDataDef name="frameBearer" dataType="String" hidden="true"/>
+	<!-- optional -->
+	<contextDataDef name="team_id"  dataType="String" />
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="frameioAccountResponseCode"  dataType="Integer"/>
+	<contextDataDef name="frameioAccountResponseString" dataType="String"/>
+	<contextDataDef name="frameioAccountResponseJson" dataType="JSON"/>
+	<contextDataDef name="accountId" dataType="String"/>
+	
+	
+
+
+</workflow>

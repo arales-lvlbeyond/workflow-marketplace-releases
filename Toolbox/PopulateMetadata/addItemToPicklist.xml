@@ -1,0 +1,153 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="addItemToPicklist"
+	name="Update Picklist"
+	executionLabelExpression="Adding picklist item ${picklistItemInput} to picklist"
+	subjectDOClassName=""
+	showInUserInterface="true"
+	resultDataDef="resultPicklistInfo"
+	sdkVersion="">
+
+	<initialStepName>case insensitive check if picklist item exists</initialStepName>
+	
+
+	<groovyStep name="case insensitive check if picklist item exists"
+		executionLabelExpression="Picklist item already exists? | ${itemExists}"
+		resultDataDef="itemExists"
+	>
+		<transition condition="${itemExists}">
+            <targetStepName>exists</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>add item to picklist</targetStepName>
+        </transition>
+		<script>
+			<![CDATA[
+				import com.levelsbeyond.api.Result
+				import com.levelsbeyond.persistence.domain.metadata.field.option.MetadataFieldOption
+				import com.levelsbeyond.service.metadata.field.option.MetadataFieldOptionService
+				import com.levelsbeyond.persistence.domain.metadata.field.MetadataField
+				import com.levelsbeyond.service.metadata.field.MetadataFieldService
+				import com.routeto1.spring.ApplicationContextHolder
+				
+				def metadataFieldOptionService = ApplicationContextHolder.getApplicationContext().getBean(MetadataFieldOptionService.class)
+				def metadataFieldService = ApplicationContextHolder.getApplicationContext().getBean(MetadataFieldService.class)
+				
+				MetadataField picklistField = metadataFieldService.find(targetPicklist).get()
+				Result<MetadataFieldOption> result = metadataFieldOptionService.find(null, picklistField, picklistItemInput, false, true)
+				
+				// check return results for option that matches selection label (case insensitive)
+				boolean hasOption = false
+				result.results().each { option ->
+					if (option.textValue.equalsIgnoreCase(picklistItemInput)) {
+						hasOption = true
+					}
+				}
+				
+				return hasOption
+			]]>
+		</script>
+	</groovyStep>
+	
+	<noopStep name="exists"
+		executionLabelExpression="Picklist value already exists."
+	>
+		<!-- Override existing picklist item value with value passed in -->
+		<transition condition="${!picklistItemValue.equals('')}">
+			<targetStepName>add item to picklist</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>get picklist item value id</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<addPickListItemStep name="add item to picklist"
+		propertyName="${targetPicklist}"
+		pickListLabel="${picklistItemInput}"
+		pickListValue="${picklistItemValue}"
+		executionLabelExpression="adding ${picklistItemInput} to ${targetPicklist}"
+		pctComplete="99"
+		nextStep="put into log"
+	/>
+	
+	<groovyStep name="put into log"
+		resultDataDef="resultString"
+		executionLabelExpression="Logging to custom file"
+		nextStep="get picklist item value id"
+		devStep="true"
+	>
+			<script>
+				<![CDATA[
+				import org.slf4j.Logger
+				import org.slf4j.LoggerFactory
+				
+				Logger logger = LoggerFactory.getLogger("picklistAdd")
+				logger.debug("New Picklist Item '"+picklistItemInput+"' added to '"+targetPicklist+"' by user '"+startedByUser+"'") //trace, warn etc
+				
+				return "success"
+				]]>
+			</script>
+	</groovyStep>
+	
+	
+	
+	<setContextData name="get picklist item value id"
+		targetDataDef="picklistItemValue"
+		valueExpression="${#picklistValue(targetPicklist, picklistItemInput)}"
+		nextStep="set result"
+		devStep="true"
+	/>
+	
+	<groovyStep name="set result"
+		resultDataDef="resultPicklistInfo"
+		nextStep="end"
+	>
+		<script>
+			<![CDATA[
+				info = [:]
+				info.field = targetPicklist
+				info.label = picklistItemInput
+				info.value = picklistItemValue
+				
+				return info
+			]]>
+		</script>
+	</groovyStep>
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="picklistInfoJson"                 dataType="JSON" />
+	<contextDataDef name="targetPicklist"                   dataType="String"       defaultDataExpression="${picklistInfoJson?.field}" />
+	<contextDataDef name="picklistItemInput"                dataType="String"       defaultDataExpression="${picklistInfoJson?.label}" />
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="itemExists"                       dataType="Boolean" />
+	<contextDataDef name="picklistItemValue"                dataType="String"       defaultDataExpression="${picklistInfoJson?.value ?: ''}" />
+	
+	<contextDataDef name="startedByUser"                    dataType="String"       defaultDataExpression="${#this.startedBy.userName}"/>
+	
+	<contextDataDef name="resultPicklistInfo"               dataType="JSON" />
+	<contextDataDef name="resultString"                     dataType="String" />
+	<contextDataDef name="val"                     			dataType="Boolean" />
+	
+</workflow>

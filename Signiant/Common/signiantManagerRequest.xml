@@ -1,0 +1,200 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="signiantManagerRequest"
+	name="Signiant Manager Request"
+	executionLabelExpression="Signiant Transfer"
+	subjectDOClassName="AssetMaster"
+	resultDataDef="responsePayload2"
+	showInUserInterface="true"
+	sdkVersion="">
+	
+	<initialStepName>build job</initialStepName>
+	
+	
+	<setContextData name="build job"
+		devStep="true"
+		nextStep="send job request to signiant">
+		<set targetDataDef="requestBody">
+			<![CDATA[
+				
+					  {
+					    "job": {
+					      "jobName": "${T(org.apache.commons.lang3.StringEscapeUtils).escapeJson(asset.name)}",
+					      "fields": {
+					        "jobGroupName": "MediaDistributor",
+					        "jobTemplateLibraryName": "Media_Mover_Workflows",
+					        "jobTemplateName": "MediaDistributor",
+					        "jobArgs": {
+					         "MediaDistributor.Source.SourceAgent" : "${sourceAgent}",
+					         "MediaDistributor.Source.SourceData" : "${T(org.apache.commons.lang3.StringEscapeUtils).escapeJson(sourceData)}",
+					          "MediaDistributor.Target.TargetAgents" : "${destinationServer}",
+					          "MediaDistributor.Target.TargetDirectory" : "${targetDirectory}",
+					          "MediaDistributor.Schedule.timezone" : "America/New_York",
+					          "MediaDistributor.Source.FileReadinessCheckType" : "Date/Time & Size",
+					          "MediaDistributor.Schedule.priority": "High",
+					          "MediaDistributor.Schedule._sp_frequency": "Once",
+							  "MediaDistributor.Schedule._sp_start_at": ""
+					        }
+					      }
+					    }
+					  }
+				
+			]]>
+		</set>
+	</setContextData>
+	
+	<!-- Send job to Signiant -->
+	<submitHttpStep name="send job request to signiant"
+		executionLabelExpression="Sending Job to Signiant: '${signiantApiEndpoint}'"
+		requestMethodExpression="POST"
+		urlExpression="${signiantAPIRequestUrl}"
+		responseCodeDataDef="responseCode"
+		responsePayloadDataDef="responsePayload">
+		<transition condition="${responseCode == 200}">
+			<targetStepName>wait 5 seconds</targetStepName>
+		</transition>
+		<transition condition="${responseCode == 400}">
+			<targetStepName>job already exists</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>copy file manually</targetStepName>
+		</transition>
+		<requestPayloadItem name="body">[${requestBody.toString()}]</requestPayloadItem>
+		<requestHeader name="username">${signiantUser}</requestHeader>
+		<requestHeader name="password">${signiantPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<!-- Wait 5 seconds for Signiant to process job -->
+	<delayStep name="wait 5 seconds"
+		executionLabelExpression="Waiting for job to start"
+		delaySecondsExpression="5"
+		devStep="true"
+		nextStep="check signiant jobs" />
+	
+	
+	<!-- Check Signiant Job for Completion -->
+	<submitHttpStep name="check signiant jobs"
+		executionLabelExpression="Checking Signiant job: '${signiantApiEndpoint}'"
+		requestMethodExpression="GET"
+		urlExpression="${GETsigniantAPIRequestUrl}"
+		responseCodeDataDef="responseCode2"
+		responsePayloadDataDef="responsePayload2">
+		<transition condition="${responsePayload2.job.fields.percentComplete == '100%'}">
+			<targetStepName>success</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>delay a bit</targetStepName>
+		</transition>
+		<requestHeader name="username">${signiantUser}</requestHeader>
+		<requestHeader name="password">${signiantPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<!-- Delay 10 seconds if job is not complete and query again ^ -->
+	<delayStep name="delay a bit"
+		executionLabelExpression="${responsePayload2.job.fields.percentComplete}pct. Waiting 10 seconds for job to complete"
+		delaySecondsExpression="10"
+		nextStep="add to counter" />
+	
+	<setContextData name="add to counter"
+		executionLabelExpression="Attempt ${counter} out of ${counterLimit}"
+		targetDataDef="counter"
+		valueExpression="${counter + 1}" >
+		<transition condition="${counter &gt; counterLimit}">
+			<targetStepName>cancel signiant job</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>check signiant jobs</targetStepName>
+		</transition>
+	</setContextData>
+	
+	<submitHttpStep name="cancel signiant job"
+		executionLabelExpression="Signiant stalled, cancelling job"
+		requestMethodExpression="DELETE"
+		urlExpression="${GETsigniantAPIRequestUrl}"
+		responseCodeDataDef="responseCodeCancel"
+		responsePayloadDataDef="responsePayloadCancel"
+		nextStep="copy file manually" >
+		<requestHeader name="username">${signiantUser}</requestHeader>
+		<requestHeader name="password">${signiantPassword}</requestHeader>
+	</submitHttpStep>
+	
+	<!-- In case of signiant failure, we will default to a copyFileStep that copies slower, but still copies in the correct directory -->
+	<copyFileStep name="copy file manually"
+		sourceFileExpression="${assetPath}"
+		targetDirectoryExpression="10.37.144.20\\WDC_Video_Ingest\\stuff\"
+		executionLabelExpression="Signiant failed, copying file manually"
+		nextStep="end" />
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="success"
+		executionLabelExpression="Successful request to Signiant! See 'responsePayload' data def for request response." />
+	
+	<noopStep name="end" />
+	
+	<!-- fail -->
+	<failWorkflowStep name="fail"
+		executionLabelExpression="Request to Signiant Manager+Agents failed. Please verify request information or verfiy that signinat was properly configured"
+		reasonExpression="Request to Signiant Manager+Agents failed. Please verify request information or verfiy that signinat was properly configured"
+	/>
+	
+	<failWorkflowStep name="job already exists"
+		reasonExpression="The job already exists on Signiant"
+		executionLabelExpression="The job already exists." />
+	
+	
+	<failWorkflowStep name="fail to id directory"
+		reasonExpression="Failed to Identify Target Directory" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="asset"                    dataType="Data Object"  defaultDataExpression="${subject}" />
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="assetPath"                dataType="String"       defaultDataExpression="${asset.originalContent.file.absolutePath}"    />
+	<!-- Source -->
+	
+	<!-- Destination-->
+	<contextDataDef name="targetDirectory"          dataType="String"       />
+	
+	<contextDataDef name="counter"                  dataType="Integer"      defaultDataExpression="0"   />
+	<contextDataDef name="counterLimit"             dataType="Integer"      defaultDataExpression="${#sysconfig('workflows.signiantManagerRequest.retryLimit') ?: 10}"  />
+	<!-- ........... Signiant ............... -->
+	<contextDataDef name="destinationServer"        dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.destinationServer')}" />
+	<contextDataDef name="sourceAgent"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.sourceAgent')}" />
+	<contextDataDef name="sourceData"               dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.sourceData')}" />
+	
+	<contextDataDef name="signiantUrl"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.signiantUrl')}" />
+	<contextDataDef name="signiantUser"             dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.signiantUser') ?: 'reachengine' }" />
+	<contextDataDef name="signiantPassword"         dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.signiantPassword') ?: 'password' }"     hidden="true"/>
+	<contextDataDef name="signiantApiEndpoint"      dataType="String"       defaultDataExpression="${#sysconfig('workflow.signiantManagerRequest.signiantApiEndpoint')}" />
+	<contextDataDef name="signiantAPIRequestUrl"    dataType="String"       defaultDataExpression="${signiantUrl}/${signiantApiEndpoint}" />
+	<contextDataDef name="GETsigniantAPIRequestUrl" dataType="String"       defaultDataExpression="${signiantUrl}/${signiantApiEndpoint}/${responsePayload.jobs.get(0).id}" />
+	<contextDataDef name="responseCode"             dataType="Integer"  />
+	<contextDataDef name="responseCode2"            dataType="Integer"  />
+	<contextDataDef name="responseCodeCancel"       dataType="Integer"  />
+	<contextDataDef name="responsePayload"          dataType="JSON"     />
+	<contextDataDef name="responsePayload2"         dataType="JSON"     />
+	<contextDataDef name="responsePayloadCancel"    dataType="JSON"     />
+	<contextDataDef name="jobName"                  dataType="String"   />
+	<contextDataDef name="requestBody"              dataType="JSON"     />
+
+</workflow>

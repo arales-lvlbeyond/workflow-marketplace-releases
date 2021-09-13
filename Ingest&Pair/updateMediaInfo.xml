@@ -1,0 +1,343 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="updateMediaInfo"
+	name="Update Media Info"
+	executionLabelExpression="Update Media Info - ${sourceFile.absolutePath}"
+	subjectDOClassName="AssetMaster"
+	showInUserInterface="true"
+	sdkVersion=""
+>
+	
+	<initialStepName>unescape xml</initialStepName>
+	
+	
+	<setContextData name="unescape xml"
+		targetDataDef="mediainfoXmlString"
+		valueExpression="${mediainfoXmlString.replaceAll('\\n', '\n').replaceAll('falsefalse','false').replaceAll('truetrue','true')}"
+		nextStep="analyze" />
+	
+	<groovyStep name="analyze"
+		resultDataDef="mediaInfo"
+		nextStep="display result">
+		<script>
+            <![CDATA[
+			import static com.google.common.base.Optional.absent;
+			import static com.google.common.base.Optional.of;
+			import static java.lang.Double.parseDouble;
+			import static java.lang.Integer.parseInt;
+			import static java.lang.String.format;
+			import static java.util.Arrays.asList;
+			import static java.util.Collections.emptyList;
+			import static org.apache.commons.lang.StringUtils.isEmpty;
+			import static org.apache.commons.lang.StringUtils.join;
+			
+			import java.text.ParseException;
+			import java.util.Collections
+			import org.apache.commons.lang.ObjectUtils;
+			import javax.xml.bind.UnmarshalException;
+			import javax.xml.stream.Location;
+			import com.fasterxml.jackson.databind.ObjectMapper;
+			import com.ctc.wstx.exc.WstxUnexpectedCharException;
+			import com.levelsbeyond.api.media.VideoMediaProfile;
+			import com.levelsbeyond.api.media.MediaProfileValidationResult
+			import com.levelsbeyond.service.media.profiles.MediaProfileServiceImpl
+			import com.routeto1.security.data.SecurityUser
+			import com.routeto1.services.system.Params;
+			import com.routeto1.services.asset.MediaAcceptProfileService
+			import com.routeto1.spring.ApplicationContextHolder
+			import com.routeto1.media.info.MediaInfo
+			import com.routeto1.media.profile.VideoAcceptProfile;
+			import com.routeto1.media.profile.VideoValidator;
+			import com.routeto1.media.profile.AudioValidator;
+			import com.routeto1.media.profile.GeneralValidator;
+			import com.routeto1.media.profile.MediaAcceptProfile;
+			import com.routeto1.media.profile.MediaAcceptProfileValidationFailure
+			import com.levelsbeyond.utils.WorkflowUtils
+			import com.routeto1.asset.convert.AssetConversionService
+			import com.routeto1.spring.ApplicationContextHolder
+			import com.routeto1.data.impl.DynamicDataObjectDAO
+			import com.levelsbeyond.search.DataObjectIndexer
+			import com.routeto1.asset.filesystem.VideoAssetContent
+			import com.routeto1.asset.IAssetContent
+			import com.routeto1.asset.filesystem.VideoAssetMaster
+			import com.routeto1.asset.filesystem.AssetContent
+			import com.routeto1.asset.filesystem.storage.ContentStorageManager
+			import com.routeto1.media.info.MediaInfo
+			import com.routeto1.media.info.MediaInfoService
+			import com.routeto1.filesystem.IFileWrapper
+			
+			def cayenneDao = ApplicationContextHolder.getApplicationContext().getBean(DynamicDataObjectDAO.class)
+			def indexer = ApplicationContextHolder.getApplicationContext().getBean(DataObjectIndexer.class)
+			// def mediaInfoData = mediaInfo
+			
+			// println "###MEDIAINFO###  ENTERING groovy step for ${targetFile}".toString()
+			class GroovyMediaInfoService implements WorkflowUtils.LoginLogoutOperation<MediaInfo, RuntimeException> {
+				final SecurityUser securityUser
+				final String stdoutMediaInfo
+				final MediaAcceptProfileService mediaAcceptProfileService
+				final String targetFile
+				final ObjectMapper mapper
+				final MediaAcceptProfile map
+				
+				GroovyMediaInfoService(final SecurityUser user, final String stdoutMediaInfo, final MediaAcceptProfile map, final String targetFile) {
+					this.securityUser = user
+					this.stdoutMediaInfo = stdoutMediaInfo
+					this.map = map
+					this.targetFile = targetFile
+					mediaAcceptProfileService = ApplicationContextHolder.getApplicationContext().getBean(MediaAcceptProfileService.class) as MediaAcceptProfileService
+					mapper = new ObjectMapper()
+				}
+				
+				List<String> split(VideoAcceptProfile videoAcceptProfile) {
+					final GeneralValidator generalValidator = videoAcceptProfile.getGeneralValidator();
+					if (generalValidator == null) {
+						return null;
+					}
+					return generalValidator.getFileExtension() != null ? splitCommaDelimited(generalValidator.getFileExtension()) : Collections.<String> emptyList();
+				}
+				
+				List<String> splitCommaDelimited(String s) {
+					if (s == null) {
+						return emptyList();
+					}
+					String[] result = s.split("(?<!\\\\),");
+					for (int i = 0; i < result.length; i++) {
+						result[i] = result[i].replaceAll("\\\\,", ",").trim();
+					}
+					return asList(result);
+				}
+				
+				List<Integer> getValidAudioChannels(VideoAcceptProfile videoAcceptProfile) {
+					final GeneralValidator generalValidator = videoAcceptProfile.getGeneralValidator();
+					if (generalValidator == null) {
+						return null;
+					}
+					List<String> strings = generalValidator.getAudioCount() != null
+						? splitCommaDelimited(generalValidator.getAudioCount())
+						: Collections.<String> emptyList();
+					
+					List<Integer> channels = new ArrayList<>();
+					for (String channelString : strings) {
+						channels.add(parseInt(channelString));
+					}
+					return channels;
+				}
+				
+				MediaProfileServiceImpl.MinMax minMaxFromRangeExpression(String rangeExpression) {
+					// println "###MEDIAINFO### minMaxFromRangeExpression(${rangeExpression})".toString()
+					if (rangeExpression == null || isEmpty(rangeExpression) || !rangeExpression.matches("^(?=\\.*\\d)(?:\\d+(?:\\.\\d+)?)?\\.\\.(?:\\d+(?:\\.\\d+)?)?\$")) {
+						return new MediaProfileServiceImpl.MinMax(null, null);
+					}
+					String[] range = rangeExpression.split("\\.\\.");
+					
+					try {
+						return new MediaProfileServiceImpl.MinMax(!range[0].isEmpty() ? MediaAcceptProfile.defaultNumberFormat().parse(range[0]) : null,
+							range.length > 1 && !range[1].isEmpty() ? MediaAcceptProfile.defaultNumberFormat().parse(range[1]) : null);
+					} catch (ParseException e) {
+						throw new IllegalArgumentException(e);
+					}
+				}
+				
+				String removeCharInXMLString(final String xml, final int badCharOffset) {
+					// final char badChar = xml.charAt(badCharOffset);
+					boolean isInTag = false
+					
+					// find tag open. if this character is within an XML tag, we need to remove the char from both open/close tags.
+					int tagStartOffset = badCharOffset - 1
+					int tagEndOffset = badCharOffset + 1
+					
+					while (true) {
+						if (tagStartOffset < 0 || xml.length() <= tagEndOffset) {
+							isInTag = false;
+							break;
+						}
+						final char tagStartChar = xml.charAt(tagStartOffset);
+						final char tagEndChar = xml.charAt(tagEndOffset);
+						if (tagStartChar == '>' || tagEndChar == '<') {
+							isInTag = false;
+							break;
+						}
+						if (tagStartChar == '<' && tagEndChar == '>') {
+							isInTag = true;
+							break;
+						}
+						if (tagStartChar != '<') {
+							tagStartOffset--;
+						}
+						if (tagEndChar != '>') {
+							tagEndOffset++;
+						}
+					}
+					
+					// find tag close. if we've decided that the character is in an XML tag, find the location of the closing tag.
+					if (isInTag) {
+						// get close tag location
+						int closeTagStartOffset = xml.substring(tagEndOffset + 1).indexOf('<') + tagEndOffset + 1;
+						if (-1 < closeTagStartOffset) {
+							// tag name (without '<' and '>')
+							String tagName = xml.substring(tagStartOffset + 1, tagEndOffset);
+							// verify close tag matches open tag
+							boolean hasCloseTag = ObjectUtils.equals("</" + tagName + '>', xml.substring(closeTagStartOffset, closeTagStartOffset + tagName.length() + 3));
+							if (hasCloseTag) {
+								// find location of bad character in closing tag
+								int badCharOffset2 = closeTagStartOffset + (badCharOffset - tagStartOffset) + 1;
+								
+								// remove character in both places
+								return xml.substring(0, badCharOffset) + xml.substring(badCharOffset + 1, badCharOffset2) + xml.substring(badCharOffset2 + 1);
+							}
+						}
+					}
+					return xml.substring(0, badCharOffset) + xml.substring(badCharOffset + 1);
+				}
+				
+				VideoMediaProfile toVideoMediaProfile(VideoAcceptProfile videoAcceptProfile) {
+					
+					GeneralValidator generalValidator = videoAcceptProfile.getGeneralValidator();
+					
+					MediaProfileServiceImpl.MinMax durationMinMax = minMaxFromRangeExpression(generalValidator != null ? generalValidator.getDuration() : null);
+					String format = generalValidator != null ? generalValidator.getFormat() : null;
+					
+					return VideoMediaProfile.builder()
+						.setId(videoAcceptProfile.getIdAsLong())
+						.setName(videoAcceptProfile.getName())
+						.setFileExtensions(split(videoAcceptProfile))
+						.setMaximumDurationSeconds(durationMinMax.maxDouble())
+						.setMinimumDurationSeconds(durationMinMax.minDouble())
+						.setValidAudioTrackCounts(getValidAudioChannels(videoAcceptProfile))
+						.setFormat(format)
+						.build();
+				}
+				
+				MediaInfo analyze() {
+					MediaInfo mediaInfo = null
+					try {
+						String xml = stdoutMediaInfo.replaceAll("\\p{Cntrl}|\\u00c2|\\u00A9", "");
+						// CORE-97:  MediaInfo sometimes spitting out bad XML, remove culprits.
+						xml = xml.replace("&#x", "");
+						while (true) {
+							try {
+								mediaInfo = MediaInfo.unmarshal(xml);
+								break
+							} catch (UnmarshalException ex) {
+								if (ex.getCause() != null
+									&& ex.getCause().getCause() != null
+									&& ex.getCause().getCause() instanceof WstxUnexpectedCharException) {
+									// remove annoying character causing unmarshaller to fail
+									WstxUnexpectedCharException exx = (WstxUnexpectedCharException) ex.getCause().getCause();
+									
+									Location badCharLoc = exx.getLocation();
+									xml = removeCharInXMLString(xml, badCharLoc.getCharacterOffset());
+									// try this shit again
+									continue
+								}
+								// else
+								throw ex
+							}
+						}
+					} catch (Exception e) {
+						println "###ecsSyncValidateMedia### Caught error analyzing media \"${targetFile}\":${e}".toString()
+					}
+					return mediaInfo
+				}
+				
+				Collection<MediaAcceptProfile> getMatchingMediaProfiles(MediaInfo mediaInfo) {
+					return mediaAcceptProfileService.getMatchingMediaProfiles(mediaInfo)
+				}
+				
+				List<String> getMatchingMediaProfilesAsJson() {
+					MediaInfo mediaInfo = analyze()
+					def rval = mediaInfo == null ? Collections.EMPTY_LIST : getMatchingMediaProfiles(mediaInfo).collect {
+						return mapper.writeValueAsString(toVideoMediaProfile(it as VideoAcceptProfile))
+					}
+					// println "###MEDIAINFO### ${rval}"
+					return rval
+				}
+				
+				MediaProfileValidationResult validateMedia() {
+					// logger.debug("Analyzing media {}", mediaFile.getAbsolutePath());
+					MediaInfo mediaInfo = analyze()
+					if (mediaInfo == null) {
+						// throw new AssetException("Unable to analyze media " + mediaFile.getAbsolutePath());
+						return null
+					}
+					List<MediaAcceptProfileValidationFailure> failures = map.match(mediaInfo);
+					MediaProfileValidationResult rval = MediaProfileValidationResult.builder()
+						.setValid(failures != null && failures.size() == 0)
+						.setValidationFailures(failures)
+						.build()
+					return rval
+				}
+				
+				List<String> getValidationFailuresAsJson() {
+					def rval = []
+					MediaProfileValidationResult validationResult = validateMedia()
+					if (validationResult != null) {
+						rval << mapper.writeValueAsString(validationResult)
+					}
+					// println "###MEDIAINFO### ${rval}"
+					return rval
+				}
+				
+				MediaInfo operation() throws RuntimeException {
+					MediaInfo rval = null
+					if (stdoutMediaInfo != null && !stdoutMediaInfo.trim().isEmpty()) {
+						rval = analyze()
+					}
+					return rval
+				}
+				
+				MediaInfo process() {
+					return WorkflowUtils.loginLogoutOperation(securityUser, "workflowStartedBy", this)
+				}
+			}
+			MediaInfo mediaInfo = new GroovyMediaInfoService(wfExe.getStartedBy(),	mediainfoXmlString, null, sourceFilePath).process()
+			VideoAssetMaster asset = cayenneDao.findById(VideoAssetMaster.class, assetMaster.getId())
+			AssetContent assetSourceContent = asset.getSourceContent();
+			assetSourceContent.updateMetadata(mediaInfo)
+			rval
+			assetSourceContent.setMetadataSourceString(mediainfoXmlString)
+			cayenneDao.commitChanges()
+			// reindex the video
+			indexer.reIndex(assetMaster)
+			return MediaInfo.marshal(mediaInfo, true).replaceAll('falsefalse','false').replaceAll('truetrue','true')
+			]]>
+    </script>
+	</groovyStep>
+	
+	<noopStep name="display result"
+		executionLabelExpression="${mediaInfo}"
+		nextStep="end"/>
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="assetMaster"      dataType="Data Object"      defaultDataExpression="${subject}"  />
+	<contextDataDef name="sourceContent"    dataType="Data Object"      defaultDataExpression="${assetMaster.getSourceContent()}"    />
+	<contextDataDef name="sourceFile"       dataType="File"             defaultDataExpression="${sourceContent?.file.absolutePath}"    />
+	<contextDataDef name="archivedPath"     dataType="String"           defaultDataExpression="${sourceContent?.restoreKey}"  />
+	<contextDataDef name="sourceFilePath"   dataType="String"           />
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="existsOnECS"      dataType="Boolean"          defaultDataExpression="${false}"     />
+	<contextDataDef name="mediaInfo"        dataType="String"           multiple="false" />
+	<contextDataDef name="wfExe"            dataType="Data Object"      defaultDataExpression="${#this}"/>
+	<contextDataDef name="mediainfoXmlString" dataType="String"         />
+</workflow>

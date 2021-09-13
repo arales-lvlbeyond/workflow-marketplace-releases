@@ -1,0 +1,92 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2016 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="globalIdAssignSubflow"
+	name="Assign GlobalID -Subflow"
+	description=""
+	executionLabelExpression=""
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion="5.4">
+	
+	<initialStepName>check for collection</initialStepName>
+	
+	<!-- Check if object is a collection -->
+	<noopStep name="check for collection" >
+		<transition condition="${asset.inventoryTypeName == 'collection'}">
+			<targetStepName>assign collection</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>get sha1</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<setContextData name="assign collection"
+		targetDataDef="userData"
+		valueExpression="c"
+		devStep="true"
+		nextStep="get GUID" />
+	
+	<executeSubflowStep name="get sha1"
+		targetWorkflowId="existingSha1AssignSubflow"
+		executionLabelExpression="Getting sha1 of asset"
+		nextStep="get GUID"
+		resultDataDef="sha1" >
+		<subflowContextDataMapping parentDataDef="asset" subflowDataDef="asset" />
+	</executeSubflowStep>
+		
+	
+	<executeSubflowStep name="get GUID"
+		targetWorkflowId="globalIdEncodeDecode"
+		executionLabelExpression="Creating globalGUID"
+		resultDataDef="globalId"
+		nextStep="save Global GUID as metadata" >
+		<subflowContextDataMapping parentDataDef="id"       subflowDataDef="id" />
+		<subflowContextDataMapping parentDataDef="system"   subflowDataDef="node" />
+		<subflowContextDataMapping parentDataDef="userData" subflowDataDef="userData" />
+	</executeSubflowStep>
+	
+	<saveDataObjectStep name="save Global GUID as metadata"
+		dataObjectExpression="${asset.metadata}"
+		continueOnException="true"
+		nextStep="end">
+		<property name="globalGUID" >${globalId.uuid}</property>
+		<property name="globalID" >${globalIdToAssign}</property>
+		<property name="sha" >${sha1}</property>
+	</saveDataObjectStep>
+	
+	
+	
+	<!-- ........................................... Ending Steps .......................................... -->
+	<noopStep name="end" pctComplete="100"/>
+	
+	
+	<!-- ........................................ Context Data Defs ........................................ -->
+	<contextDataDef name="asset"                dataType="Data Object"      />
+	<contextDataDef name="globalId"             dataType="JSON"             />
+	<contextDataDef name="userData"             dataType="String"          defaultDataExpression="" />
+	<contextDataDef name="id"                   dataType="Integer"         defaultDataExpression="${asset.id}" />
+	<contextDataDef name="system"               dataType="String"          defaultDataExpression="${#sysconfig('workflow.globalID.originalServer')?:'NON'}" />
+	<contextDataDef name="globalIdToAssign"     dataType="String"          defaultDataExpression="${system}${asset.id}" />
+	<contextDataDef name="sha1"                 dataType="String"          defaultDataExpression="" />
+
+
+</workflow>

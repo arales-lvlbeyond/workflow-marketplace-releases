@@ -1,0 +1,251 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xsi:schemaLocation="http://schema.levelsbeyond.com.s3.amazonaws.com/latest/studio.xsd"
+          id="mpRevCaptionAsset"
+          name="Submit a Rev.com Caption Order"
+          executionLabelExpression="Caption Asset via Rev.com - Asset Name: ${subject.name}"
+          subjectQualifierExpression="${metadata.mpRevOrderStatus != ( #picklistValue('mpRevOrderStatus', 'Order Placed - Pending')) AND metadata.mpRevOrderStatus != ( #picklistValue('mpRevOrderStatus', 'Order Complete'))}"
+          subjectDOClassName="VideoAssetMaster"
+          group="REV"
+          showInUserInterface="true"
+          sdkVersion=""
+>
+
+    <initialStepName>create signed url</initialStepName>
+
+
+    <setContextData
+            name="create signed url"
+            executionLabelExpression="Create Signed Expiry URL for ${asset.name}"
+            nextStep="set caption formats"
+    >
+        <set targetDataDef="signedUrl"  valueExpression="${T(com.routeto1.spring.ApplicationContextHolder).getApplicationContext().getBean('s3FileHandler').getAuthenticatedURL(proxyFile.absolutePath, expireTime.longValue())}"/>
+    </setContextData>
+
+    <setContextData name="set caption formats"
+                    executionLabelExpression="Set caption formats for ${asset.name}"
+                    targetDataDef="fileFormatLabels"
+                    valueExpression="${#picklistLabels('mpRevCaptionFormats', closedCaptionFormat, ',')}"
+                    nextStep="build caption list"
+    />
+
+    <groovyStep name="build caption list"
+                executionLabelExpression="Build Caption List for ${asset.name}"
+                resultDataDef="fileFormatList"
+                nextStep="build caption order request body"
+                devStep="true"
+    >
+        <script>
+            <![CDATA[
+			def list = []
+			fileFormatLabels.each { fileFormat ->
+				list.add("\"" + fileFormat + "\"")
+			}
+			return list
+			]]>
+        </script>
+    </groovyStep>
+
+    <setContextData name="build caption order request body"
+                    executionLabelExpression="Build caption order request body for ${asset.name}"
+                    nextStep="run cmd create caption transcript order"
+                    devStep="true">
+
+        <set targetDataDef="captionRequestBody">
+            <![CDATA[
+                    {
+                        "caption_options":{
+                            "inputs":[
+                                 {
+                                    "external_link":"${signedUrl}"
+                                 }
+                            ],
+                            "output_file_formats":${fileFormatList.toString()},
+                            "rush" : ${rushOrder}
+                        }
+                    }
+			]]>
+        </set>
+    </setContextData>
+
+    <runCommandStep
+            name="run cmd create caption transcript order"
+            executionLabelExpression="Creating caption transcript order for ${asset.name}"
+            executablePathExpression="${curlExecutablePath}"
+            stdoutDataDef="curlResponse"
+            stderrDataDef="orderError"
+            resultCodeDataDef="resultCode"
+            devStep="true"
+    >
+        <transition condition="${curlResponse != null}">
+            <targetStepName>parse curl response</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>caption transcript order creation failure</targetStepName>
+        </transition>
+
+        <arg>-i</arg>
+        <arg>-X</arg>
+        <arg>POST</arg>
+        <arg>${revUrl}/api/v1/orders</arg>
+        <arg>-H</arg>
+        <arg>Expect:</arg>
+        <arg>-H</arg>
+        <arg>Authorization: Rev ${clientApiKey}:${userApiKey}</arg>
+        <arg>-H</arg>
+        <arg>Content-Type: application/json</arg>
+        <arg>-d</arg>
+        <arg>${captionRequestBody}</arg>
+    </runCommandStep>
+
+    <groovyStep name="parse curl response"
+                executionLabelExpression="Parse curl response for ${asset.name}"
+                resultDataDef="captionResponseJson"
+                devStep="true"
+    >
+        <transition condition="${captionResponseJson != null AND captionResponseJson.responseCode == '201'}">
+            <targetStepName>set order url</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>caption transcript order creation failure</targetStepName>
+        </transition>
+
+        <script>
+            <![CDATA[
+			import groovy.json.JsonOutput
+			import java.lang.Integer
+			import java.lang.Exception
+            def responseMatcher = curlResponse[0] =~ / (\d+) (.*)$/
+			def responseCode = responseMatcher[0][1]
+			def responseMsg = responseMatcher[0][2]
+            def headers = curlResponse.subList(1, curlResponse.size()).findAll {
+                it != null && !it.isEmpty()
+            }.collect {
+                it.split(': ', 2)
+            }.collectEntries {
+                [it[0].toLowerCase(), it[1]]
+            }
+            def rval = [
+                headers: headers,
+                responseCode: responseCode,
+                responseMsg: responseMsg
+            ]
+            return JsonOutput.toJson(rval)
+			]]>
+        </script>
+    </groovyStep>
+
+    <setContextData name="set order url"
+                    executionLabelExpression="Set order Url for ${asset.name}"
+                    nextStep="save metadata">
+        <set targetDataDef="orderUrl" valueExpression="${captionResponseJson.headers.location}"/>
+    </setContextData>
+
+    <saveDataObjectStep name="save metadata"
+                        dataObjectExpression="${asset.metadata}"
+                        executionLabelExpression="Updating metadata for ${asset.name}"
+                        nextStep="Save Rev.com URL">
+
+        <property name="mpRevOrderNumber">${orderUrl.substring(orderUrl.lastIndexOf('/') + 1)}</property>
+        <property name="mpRevOrderStatus">${#picklistValue('mpRevOrderStatus', 'Order Placed - Pending')}</property>
+        <property name="mpRevCaptionFormats">${#joinElements(closedCaptionFormat, '|')}</property>
+    </saveDataObjectStep>
+
+    <setAssociationMetadataStep name="Save Rev.com URL"
+                                executionLabelExpression="Set metadata links for rev order url for ${asset.name}"
+                                targetExpression="${asset}"
+                                propertyNameExpression="mpRevOrderUrl"
+                                valueExpression="{&quot;title&quot;: &quot;${orderUrl}&quot;, &quot;url&quot;: &quot;${orderUrl}&quot;}"
+                                nextStep="order successfully submitted"
+                                devStep="true"
+    />
+
+    <createSuccessNotificationStep name="order successfully submitted"
+                                   executionLabelExpression="Order successfully submitted for ${asset.name}"
+                                   notificationTypeExpression="success"
+                                   notificationBodyExpression="Rev.com caption order for ${asset.name} successfully submitted."
+                                   nextStep="end"
+    />
+
+    <!-- ...................................................... End Steps ...................................................... -->
+    <!-- success -->
+    <noopStep name="end"	pctComplete="100"/>
+
+
+    <failWorkflowStep name="caption transcript order creation failure"
+                      reasonExpression="Error requesting creation of caption transcript order. Check status for details."
+    />
+
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <!-- ............ Input Variables ............. -->
+    <!-- ...................................................... End Steps ...................................................... -->
+    <!-- success -->
+    <noopStep name="end"	pctComplete="100"/>
+
+
+    <failWorkflowStep name="caption transcript order creation failure - ${captionResponseJson.responseMsg}"
+                      reasonExpression="Error requesting creation of caption transcript order. Check status for details."
+    />
+
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <!-- ............ Input Variables ............. -->
+    <contextDataDef name="asset" 				dataType="Data Object" 	defaultDataExpression="${subject}" />
+
+    <contextDataDef name="closedCaptionFormat"  dataType="String"       userInput="true" required="true" 	 label="Closed caption format" multiple="true" defaultDataExpression="SubRip, Dfxp">
+        <picklist>
+            <metadataProperty>mpRevCaptionFormats</metadataProperty>
+        </picklist>
+    </contextDataDef>
+
+    <contextDataDef name="rushOrder" 			dataType="Boolean"		userInput="true" required="true"	label="Rush order?" />
+
+    <!-- .......... Processing variables .......... -->
+    <contextDataDef name="sourceFile" 			dataType="File" 		defaultDataExpression="${asset.originalContent.file}" />
+
+    <contextDataDef name="orderUrl" 			dataType="String" />
+    <contextDataDef name="captionRequestBody"   dataType="String" />
+
+    <contextDataDef name="webMTranscodeFile" 	dataType="File" />
+    <contextDataDef name="proxyFile" 		    dataType="File"         defaultDataExpression="${#proxyContent(subject)?.file}"/>
+    <contextDataDef name="signedUrl" 			dataType="String" />
+
+    <contextDataDef name="orderError" 			dataType="String" />
+    <contextDataDef name="curlResponse"         dataType="String"       multiple="true" />
+    <contextDataDef name="resultCode"           dataType="Integer" />
+    <contextDataDef name="fileFormatLabels"     dataType="String"       multiple="true"/>
+    <contextDataDef name="fileFormatList"       dataType="String"       multiple="true"/>
+    <contextDataDef name="captionResponseJson"  dataType="JSON" />
+
+    <!-- Configurations -->
+    <contextDataDef name="revUrl"               dataType="String"       defaultDataExpression="${#sysconfig('marketplace.rev.revUrl') ?: 'https://api-sandbox.rev.com'}" />
+    <contextDataDef name="clientApiKey" 		dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.clientApiKey')}"/>
+    <contextDataDef name="userApiKey" 			dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.userApiKey')}"/>
+    <contextDataDef name="expireTime" 			dataType="Double" 		defaultDataExpression="${#sysconfig('marketplace.rev.captionAsset.expireTime') ?: '259200000'}" />
+    <contextDataDef name="curlExecutablePath"	dataType="String" 		defaultDataExpression="${#sysconfig('system.curlExecutablePath')  ?: '/usr/bin/curl'}" />
+    
+    <!-- ......... Curl response PROCESSING ........... -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="url"                  dataType="String"       defaultDataExpression="${revUrl}/api/v1/orders"/>
+    <contextDataDef name="method"               dataType="String"       defaultDataExpression="POST" />
+    <contextDataDef name="headers"              dataType="String"       defaultDataExpression="Authorization: Rev ${clientApiKey}:${userApiKey},Content-Type: application/json"    multiple="true"/>
+    <contextDataDef name="response"             dataType="JSON" />
+
+</workflow>

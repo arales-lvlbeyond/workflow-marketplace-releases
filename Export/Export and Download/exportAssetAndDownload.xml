@@ -1,0 +1,143 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2019 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://schema.levelsbeyond.com/latest/studio.xsd"
+		id="exportAssetAndDownload"
+		name="Export Asset and Download"
+		description="Export and asset to a default or new transcoding format, and create a download link in the Status tab."
+		executionLabelExpression="Export Asset | ${subject.name}"
+		subjectDOClassName="VideoAssetMaster"
+		showInUserInterface="true"
+		sdkVersion=""
+		hasDownload="true"
+>
+
+	<initialStepName>workflow started</initialStepName>
+	
+
+	<createSuccessNotificationStep name="workflow started"
+			executionLabelExpression="Workflow has started"
+			notificationTypeExpression="success"
+			notificationBodyExpression="Workflow has started. Please wait..."
+			devStep="true"
+			nextStep="check input values"/>
+	
+	
+	<noopStep name="check input values"
+			executionLabelExpression="Content Use: ${contentUse} | Template: ${targetTemplateName}">
+		<transition condition="${contentUse == 'OTHER' AND targetTemplateName == null}">
+			<targetStepName>conversion template not found</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>make directory</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<runCommandStep name="make directory"
+			executionLabelExpression="Make Directory: ${directoryToZip.absolutePath}"
+			executablePathExpression="/bin/mkdir"
+			nextStep="export videos"
+	>
+		<arg>${directoryToZip.absolutePath}</arg>
+	</runCommandStep>
+	
+	
+	<executeSubflowStep name="export videos"
+			executionLabelExpression="Export all videos to ${contentUse} and copy to temp directory"
+			targetWorkflowId="exportAssets"
+			subjectChangePath="${subject}"
+			nextStep="zip directory">
+		
+		<subflowContextDataMapping parentDataDef="contentUse" subflowDataDef="contentUse"/>
+		<subflowContextDataMapping parentDataDef="targetTemplateName" subflowDataDef="targetTemplateName"/>
+		<subflowContextDataMapping parentDataDef="directoryToZip" subflowDataDef="directoryToZip"/>
+	</executeSubflowStep>
+	
+	
+	<compressFileStep name="zip directory"
+			executionLabelExpression="Zipping Directory: ${directoryToZip.name}"
+			sourceFilesExpression="${directoryToZip}"
+			targetDirectoryExpression="${directoryToZip.absolutePath}"
+			resultDataDef="zippedFile"
+			nextStep="set zip as download"
+	/>
+	
+	
+	<setWorkflowDownloadStep name="set zip as download"
+			executionLabelExpression="Create download link"
+			sourceFileExpression="${zippedFile}"
+			devStep="true"
+			nextStep="remove temp directory"
+	/>
+	
+	
+	<deleteFileStep
+			name="remove temp directory"
+			sourceFilesExpression="${directoryToZip}"
+			executionLabelExpression="Remove ${directoryToZip.absolutePath}"
+			nextStep="notify download ready"
+	/>
+	
+	
+	<createSuccessNotificationStep name="notify download ready"
+			executionLabelExpression="Video exported successfully"
+			notificationTypeExpression="success"
+			notificationBodyExpression="Your video is exported. Download link is available in the Status tab."
+			devStep="true"
+			nextStep="end" />
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	
+	<createFailureNotificationStep name="conversion template not found"
+			executionLabelExpression="Conversion template not found"
+			notificationTypeExpression="error"
+			notificationBodyExpression="Vantage template is null. Please select a valid Vantage template."
+			nextStep="end"/>
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="contentUse" dataType="String" userInput="true" required="true">
+		<picklist>
+			<picklistItem value="SOURCE" label="Source" index="1"/>
+			<picklistItem value="MEZZANINE" label="Mezzanine" index="2"/>
+			<picklistItem value="PROXY" label="Proxy" index="3"/>
+			<picklistItem value="OTHER" label="Other" index="4"/>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="targetTemplate" dataType="Data Object" userInput="true" required="true">
+		<picklist>
+			<dataObjectSearch dataObjectClass="VideoContentTemplate">
+				<searchPath>name</searchPath>
+			</dataObjectSearch>
+		</picklist>
+	</contextDataDef>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="tempPath" dataType="String" defaultDataExpression="${#sysconfig('temp.export.path')}"/>
+	<contextDataDef name="directoryToZip" dataType="Directory" defaultDataExpression="${tempPath}/${#uuid().toString()}"/>
+	<contextDataDef name="zippedFile" dataType="Directory"/>
+	<contextDataDef name="exportedFile" dataType="File"/>
+	<contextDataDef name="targetTemplateName" dataType="String" defaultDataExpression="${targetTemplate.name}" />
+
+	
+</workflow>

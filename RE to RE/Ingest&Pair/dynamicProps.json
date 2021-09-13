@@ -1,0 +1,10 @@
+{
+  "GAZORP": "",
+  "marketplace.ingestPair.siblingServer1": "bigchungus.reachengine.rocks",
+  "marketplace.ingestPair.siblingAddress1": "https://bigchungus.reachengine.rocks",
+  "marketplace.ingestPair.signiantConfigured": false,
+  "marketplace.ingestPair.awsTransferBucket": "s3:re2re-transfer:",
+  "marketplace.ingestPair.ingestSubflow": "_anyAssetIngest",
+  "marketplace.ingestPair.siblingUsername1": "system",
+  "marketplace.ingestPair.siblingPassword1": "password"
+}

@@ -1,0 +1,118 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+          id="getMediaShuttlePackageContent"
+          name="Get MediaShuttle Package Content"
+          executionLabelExpression="Get Package Content via MediaShuttle"
+          subjectDOClassName=""
+          showInUserInterface="false"
+          resultDataDef="packageContent"
+          sdkVersion=""
+          devWorkflow="true"
+>
+    
+    <initialStepName>get portal id</initialStepName>
+    
+    <executeSubflowStep name="get portal id"
+                        targetWorkflowId="getMediaShuttlePortal"
+                        executionLabelExpression="Get Media Shuttle portal"
+                        resultDataDef="portalId"
+    >
+        <transition condition="${portalId != null}">
+            <targetStepName>set package content url</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to retrieve portal id</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+    </executeSubflowStep>
+    
+    <setContextData name="set package content url"
+                    valueExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/packages/${packageId}/files"
+                    targetDataDef="packageContentUrl"
+                    devStep="true"
+                    nextStep="get package content" />
+    
+    <submitHttpStep name="get package content"
+                    urlExpression="${packageContentUrl}"
+                    requestMethodExpression="GET"
+                    responseCodeDataDef="getPackageContentResponseCode"
+                    responsePayloadDataDef="getPackageContentResponse"
+                    executionLabelExpression="Requesting package content for '${packageId}'..."
+                    pctComplete="15"
+    >
+        <transition condition="${getPackageContentResponseCode.startsWith('2')}">
+            <targetStepName>set package content</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to retrieve package content</targetStepName>
+        </transition>
+        
+        <requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+    </submitHttpStep>
+    
+    <setContextData name="set package content"
+                    valueExpression="${getPackageContentResponse?.get('files')}"
+                    devStep="true"
+                    targetDataDef="packageContent"
+                    >
+        <transition condition="${packageContent != null}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>unable to parse mediashuttle package content</targetStepName>
+        </transition>
+    </setContextData>
+    
+    <!-- ................................................... End Steps .................................................... -->
+    <!-- fail -->
+    <failWorkflowStep name="failed to retrieve portal id"
+                      reasonExpression="Failed to retrieve portal ID from MediaShuttle."
+                      executionLabelExpression="Failed to retrieve portal ID from MediaShuttle"
+    />
+    
+    <failWorkflowStep name="failed to retrieve package content"
+                      reasonExpression="failed to retrieve package content." />
+    
+    <failWorkflowStep name="unable to parse mediashuttle package content"
+                      reasonExpression="unable to parse mediashuttle package content." />
+    
+    <!-- success -->
+    <noopStep name="end"/>
+    
+    <!-- ................................................... Data Defs .................................................... -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="packageId" dataType="String" required="true" />
+    
+    <!-- ......... PROCESSING ........... -->
+    <contextDataDef name="packageContent" dataType="JSON" multiple="true" />
+    <contextDataDef name="portalId" dataType="String" />
+    
+    <!--API responses and codes-->
+    <contextDataDef name="getPackageContentResponseCode" dataType="String"/>
+    <contextDataDef name="getPackageContentResponse" dataType="JSON"/>
+    
+    <!-- ......... DEFAULTS ........... -->
+    <contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String" defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+    <contextDataDef name="packageContentUrl" dataType="String" />
+</workflow>

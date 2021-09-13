@@ -1,0 +1,67 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="wolftechAuthentication"
+	name="Wolftech Authentication"
+	description=""
+	executionLabelExpression="Wolftech Authentication | Get Reach Engine Authenicated for Wolftech APIs"
+	deadlineExpression=""
+	resultDataDef="bearerToken"
+	subjectDOClassName=""
+	showInUserInterface="true"
+	sdkVersion=""
+	>
+	
+	<initialStepName>hit auth api</initialStepName>
+	
+
+	<runCommandStep
+		name="hit auth api"
+		executionLabelExpression="Response >>> ${wolftechResponse.toString()}"
+		executablePathExpression="/bin/sh"
+		stdoutDataDef="wolftechResponse"
+		nextStep="parse bearer token"
+		>
+		<arg>-c</arg>
+		<arg>curl -X POST ${wolftechAuthURL} -H 'Content-Type: application/x-www-form-urlencoded' -d 'grant_type=client_credentials&amp;scope=api.workflow&amp;client_id=WorkflowApi&amp;client_secret=${wolftechClientSecret}'</arg>
+	</runCommandStep>
+	
+	<setContextData
+		name="parse bearer token"
+		executionLabelExpression="Bearer token >>> ${bearerToken} | expiresIn >>> ${expiresIn}"
+		nextStep="end"
+		>
+		<set targetDataDef="bearerToken">${wolftechResponse.get('access_token')?.asText()}</set>
+		<set targetDataDef="expiresIn">${wolftechResponse.get('expires_in')?.asInt()}</set>
+	</setContextData>
+	
+	<noopStep name="end"/>
+	
+	<!-- Processing Data Defs -->
+	<contextDataDef name="wolftechResponse"         dataType="JSON"/>
+	<contextDataDef name="expiresIn"                dataType="Integer"/>
+	<contextDataDef name="bearerToken"              dataType="String"/>
+	
+	<!-- Default Data Defs -->
+	<contextDataDef name="wolftechAuthURL"          dataType="String" defaultDataExpression="${#sysconfig('workflow.wolftech.authURL')}"/>
+	<contextDataDef name="wolftechClientSecret"     dataType="String" defaultDataExpression="${#sysconfig('workflow.wolftech.clientSecret')}"  hidden="true"/>
+	
+</workflow>

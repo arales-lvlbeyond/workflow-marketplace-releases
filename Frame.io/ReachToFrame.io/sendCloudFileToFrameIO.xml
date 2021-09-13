@@ -1,0 +1,119 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="sendCloudFileToFrameIO"
+          name="Send Cloud File to Frame.IO"
+          executionLabelExpression="Sending ${targetFile.name} to Frame.io"
+          resultDataDef="frameId"
+          description=""
+          showInUserInterface="false"
+          group="Frame.io"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion="">
+
+    <initialStepName>Set JSON body</initialStepName>
+
+    <setContextData name="Set JSON body"
+                    devStep="true"
+                    nextStep="Submit file to FrameIO">
+        <set targetDataDef="frameioRequestBody">
+            <![CDATA[
+                    {
+                        "type":"file",
+                        "name":"${targetFile.name}",
+                        "filetype":"${mimeType}",
+                        "filesize":${targetFile.length},
+                        "source":{
+                            "url":"${targetFile.getAuthenticatedURL()}"
+                        }
+                    }
+                ]]>
+        </set>
+    </setContextData>
+
+    <submitHttpStep name="Submit file to FrameIO"
+                    urlExpression="${frameioURL}${rootAssetId}/children"
+                    requestMethodExpression="POST"
+                    responseCodeDataDef="frameioResponseCode"
+                    responsePayloadDataDef="frameioResponseString"
+                    nextStep="Set FrameIO Response JSON">
+        <requestPayloadItem name="body">${frameioRequestBody.toString()}</requestPayloadItem>
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <setContextData name="Set FrameIO Response JSON"
+                    devStep="true"
+                    targetDataDef="frameioResponseJson"
+                    valueExpression="${frameioResponseString}">
+        <transition condition="${frameioResponseJson == null}">
+            <targetStepName>Unexpected Response Format from Frame.io</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>Set Frame.io ID</targetStepName>
+        </transition>
+    </setContextData>
+
+    <setContextData name="Set Frame.io ID"
+                    devStep="true"
+                    executionLabelExpression="Frame.io Response URL = ${frameId}"
+                    targetDataDef="frameId"
+                    valueExpression="${frameioResponseJson.id}">
+        <transition condition="${frameId != null}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>Error Retrieving Frame.io ID from JSON Response</targetStepName>
+        </transition>
+    </setContextData>
+
+
+
+    <!--  End steps  -->
+    <failWorkflowStep name="Unexpected Response Format from Frame.io"
+                      reasonExpression="Unexpected Response Format from Frame.io"/>
+
+    <failWorkflowStep name="Error Retrieving Frame.io ID from JSON Response"
+                      reasonExpression="Error Retrieving Frame.io ID from JSON Response"/>
+
+    <noopStep name="end"/>
+
+    <!--    CONTEXT DATA   -->
+    <!--  Input  -->
+    <contextDataDef name="targetFile"               dataType="File"/>
+    <contextDataDef name="rootAssetId"              dataType="String"/>
+    <contextDataDef name="mimeType"                 dataType="String"/>
+
+    <!--  Processing  -->
+    <contextDataDef name="frameioRequestBody"       dataType="JSON"/>
+    <contextDataDef name="frameioURL"               dataType="String"       defaultDataExpression="https://api.frame.io/v2/assets/"/>
+    <contextDataDef name="frameBearer"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"   hidden="true"/>
+
+    <!-- Responses -->
+    <contextDataDef name="frameioResponseCode"      dataType="Integer"/>
+    <contextDataDef name="frameioResponseString"    dataType="String"/>
+    <contextDataDef name="frameioResponseJson"      dataType="JSON"/>
+
+    <!--  Result  -->
+    <contextDataDef name="frameId"                  dataType="String"/>
+
+</workflow>

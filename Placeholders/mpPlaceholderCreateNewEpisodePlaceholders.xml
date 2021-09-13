@@ -1,0 +1,615 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="mpPlaceholderCreateNewEpisodePlaceholders"
+          name="Create New Episode Placeholders"
+          executionLabelExpression="Creating placeholders for episode ${collection.name}"
+          description=""
+          subjectDOClassName=""
+          showInUserInterface="false"
+          resultDataDef=""
+          sdkVersion="">
+
+    <initialStepName>check if add only</initialStepName>
+
+    <noopStep
+            name="check if add only"
+            executionLabelExpression="Add only? ${addOnly}">
+        <transition condition="${addOnly}">
+            <targetStepName>switch added placeholders</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>check language</targetStepName>
+        </transition>
+    </noopStep>
+
+    <!-- START New Episode Logic -->
+    <noopStep
+            name="check language"
+            executionLabelExpression="language = ${language}">
+        <transition condition="${language.equals('en_US')}">
+            <targetStepName>create production master video</targetStepName>
+        </transition>
+        <transition condition="${containsForced}">
+            <targetStepName>create forced narrative</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>create dub video</targetStepName>
+        </transition>
+    </noopStep>
+
+    <!-- If en_US, create Video Mez, Poster Art, Title Card, Promos, and CC-->
+    <executeSubflowStep
+            name="create production master video"
+            pctComplete="20"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create poster art">
+        <subflowContextDataMapping parentDataDef="videoMasterContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"                 subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"             subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"           subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"               subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create poster art"
+            targetWorkflowId="${createImageSubflowId}"
+            nextStep="create title card">
+        <subflowContextDataMapping parentDataDef="posterArtContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create title card"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create promo 10">
+        <subflowContextDataMapping parentDataDef="titleCardContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create promo 10"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create promo 15">
+        <subflowContextDataMapping parentDataDef="promoContentType"     subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType10"          subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create promo 15"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create promo 30">
+        <subflowContextDataMapping parentDataDef="promoContentType"     subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType15"          subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create promo 30"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create cc">
+        <subflowContextDataMapping parentDataDef="promoContentType"     subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType30"          subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create cc"
+            pctComplete="30"
+            targetWorkflowId="${createDocumentSubflowId}">
+        <transition condition="${containsForced}">
+            <targetStepName>create forced narrative</targetStepName>
+        </transition>
+        <transition condition="${language.equals('en_US')}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>create dub video</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="closedCaptionContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"             subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                 subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <!-- Create Forced Narrative (if required) -->
+    <executeSubflowStep
+            name="create forced narrative"
+            pctComplete="40"
+            targetWorkflowId="${createDocumentSubflowId}">
+        <transition condition="${language.equals('en_US')}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>create dub video</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="forcedNarrativeContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"                   subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"                 subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                     subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <!-- If not en_US, create dub card video, single 8ch audio, alt poster art, alt title card, and subtitle -->
+    <executeSubflowStep
+            name="create dub video"
+            pctComplete="50"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create 8ch audio">
+        <subflowContextDataMapping parentDataDef="dubCardContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create 8ch audio"
+            pctComplete="60"
+            targetWorkflowId="${createAudioSubflowId}"
+            nextStep="create alt poster art">
+        <subflowContextDataMapping parentDataDef="audioMasterContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="audio8chTrackType"        subflowDataDef="trackType"/>
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"             subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                 subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create alt poster art"
+            targetWorkflowId="${createImageSubflowId}"
+            nextStep="create alt title card">
+        <subflowContextDataMapping parentDataDef="posterArtContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create alt title card"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="create subtitle">
+        <subflowContextDataMapping parentDataDef="titleCardContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="create subtitle"
+            pctComplete="70"
+            targetWorkflowId="${createDocumentSubflowId}"
+            nextStep="end">
+        <subflowContextDataMapping parentDataDef="subtitleContentType"  subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+    <!-- END New Episode Logic -->
+
+    <!-- Process optional placeholders -->
+    <noopStep
+            name="switch added placeholders"
+            pctComplete="80"
+            executionLabelExpression="List = ${additionalPlaceholders.toString()}">
+        <transition condition="${additionalPlaceholders.contains('audioMaster')}">
+            <targetStepName>add audio master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('closedCaption')}">
+            <targetStepName>add closed caption</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('dubCard')}">
+            <targetStepName>add dub card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('forcedNarrative')}">
+            <targetStepName>add forced narrative</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('posterArt')}">
+            <targetStepName>add poster art</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+
+    <executeSubflowStep
+            name="add audio master"
+            targetWorkflowId="${createAudioSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('closedCaption')}">
+            <targetStepName>add closed caption</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('dubCard')}">
+            <targetStepName>add dub card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('forcedNarrative')}">
+            <targetStepName>add forced narrative</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('posterArt')}">
+            <targetStepName>add poster art</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="audioMasterContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="audio8chTrackType"        subflowDataDef="trackType"/>
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"             subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                 subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add closed caption"
+            targetWorkflowId="${createDocumentSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('dubCard')}">
+            <targetStepName>add dub card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('forcedNarrative')}">
+            <targetStepName>add forced narrative</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('posterArt')}">
+            <targetStepName>add poster art</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="closedCaptionContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"             subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                 subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add dub card"
+            targetWorkflowId="${createVideoSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('forcedNarrative')}">
+            <targetStepName>add forced narrative</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('posterArt')}">
+            <targetStepName>add poster art</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="dubCardContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add forced narrative"
+            targetWorkflowId="${createDocumentSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('posterArt')}">
+            <targetStepName>add poster art</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="forcedNarrativeContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"                   subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"                 subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                     subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add poster art"
+            targetWorkflowId="${createImageSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('subtitle')}">
+            <targetStepName>add subtitle</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="posterArtContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add subtitle"
+            targetWorkflowId="${createDocumentSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('videoMaster')}">
+            <targetStepName>add video master</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="subtitleContentType"  subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add video master"
+            targetWorkflowId="${createVideoSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('titleCard')}">
+            <targetStepName>add title card</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="videoMasterContentType"   subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"                   subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"               subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"             subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"                 subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add title card"
+            targetWorkflowId="${createVideoSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('promo10')}">
+            <targetStepName>add promo 10</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="titleCardContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="format"               subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"           subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"         subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"             subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add promo 10"
+            targetWorkflowId="${createVideoSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('promo15')}">
+            <targetStepName>add promo 15</targetStepName>
+        </transition>
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="promoContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType10"      subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"           subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"       subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"     subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"         subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add promo 15"
+            targetWorkflowId="${createVideoSubflowId}">
+        <transition condition="${additionalPlaceholders.contains('promo30')}">
+            <targetStepName>add promo 30</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <subflowContextDataMapping parentDataDef="promoContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType15"      subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"           subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"       subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"     subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"         subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep
+            name="add promo 30"
+            targetWorkflowId="${createVideoSubflowId}"
+            nextStep="end">
+        <subflowContextDataMapping parentDataDef="promoContentType" subflowDataDef="contentType"/>
+        <subflowContextDataMapping parentDataDef="promoType30"      subflowDataDef="promoType"/>
+        <subflowContextDataMapping parentDataDef="format"           subflowDataDef="format"/>
+        <subflowContextDataMapping parentDataDef="collection"       subflowDataDef="collection"/>
+        <subflowContextDataMapping parentDataDef="jsonMetadata"     subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="language"         subflowDataDef="language"/>
+    </executeSubflowStep>
+
+    <noopStep name="end"/>
+
+    <!-- ................................................... Data Defs .................................................... -->
+
+    <!-- ............ INPUT ............. -->
+
+    <contextDataDef name="collection"   dataType="Data Object"/>
+    <contextDataDef name="jsonMetadata" dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+                {
+                    ${mpMetadataFieldNameSeries}: "${collection.metadata.mpPlaceholderSeries}",
+                    ${mpMetadataFieldNameSeason}: "${collection.metadata.mpPlaceholderSeason}",
+                    ${mpMetadataFieldNameEpisodeNumber}: "${collection.metadata.mpPlaceholderEpisodeNumber}"
+                }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+
+    <contextDataDef name="language"                         dataType="String"       defaultDataExpression="en_US"/>
+    <contextDataDef name="format"                           dataType="String"       required="true"/>
+    <contextDataDef name="additionalPlaceholders"           dataType="String"       multiple="true"/>
+    <contextDataDef name="addOnly"                          dataType="Boolean"      defaultDataExpression="false"/>
+    <contextDataDef name="containsForced"                   dataType="Boolean"/>
+
+    <!-- ......... PROCESSING ........... -->
+
+    <!-- metadata field/property names -->
+    <contextDataDef name="mpMetadataFieldNameContentType"   dataType="String"       defaultDataExpression="${'mpPlaceholderContentType'}"/>
+    <contextDataDef name="mpMetadataFieldNameSeries"        dataType="String"       defaultDataExpression="${'mpPlaceholderSeries'}"/>
+    <contextDataDef name="mpMetadataFieldNameSeason"        dataType="String"       defaultDataExpression="${'mpPlaceholderSeason'}"/>
+    <contextDataDef name="mpMetadataFieldNameEpisodeNumber" dataType="String"       defaultDataExpression="${'mpPlaceholderEpisodeNumber'}"/>
+    <contextDataDef name="mpMetadataFieldNamePromoType"     dataType="String"       defaultDataExpression="${'mpPlaceholderPromoType'}"/>
+    <contextDataDef name="mpMetadataFieldNameTrackType"     dataType="String"       defaultDataExpression="${'mpPlaceholderTrackType'}"/>
+
+
+    <!--    Subflows-->
+    <contextDataDef name="createVideoSubflowId"             dataType="String"       defaultDataExpression="mpPlaceholderCreateVideoPlaceholder" />
+    <contextDataDef name="createAudioSubflowId"             dataType="String"       defaultDataExpression="mpPlaceholderCreateAudioPlaceholder" />
+    <contextDataDef name="createImageSubflowId"             dataType="String"       defaultDataExpression="mpPlaceholderCreateImagePlaceholder" />
+    <contextDataDef name="createDocumentSubflowId"          dataType="String"       defaultDataExpression="mpPlaceholderCreateDocumentPlaceholder" />
+
+    <!-- Content Types -->
+    <contextDataDef name="videoMasterContentType"           dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Video Master')}"/>
+    <contextDataDef name="posterArtContentType"             dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Poster Art')}"/>
+    <contextDataDef name="audioMasterContentType"           dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Audio Master')}"/>
+    <contextDataDef name="closedCaptionContentType"         dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Closed Caption')}"/>
+    <contextDataDef name="forcedNarrativeContentType"       dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Forced Narrative')}"/>
+    <contextDataDef name="subtitleContentType"              dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Subtitle')}"/>
+    <contextDataDef name="dubCardContentType"               dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Dub Card')}"/>
+    <contextDataDef name="titleCardContentType"             dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Title Card')}"/>
+    <contextDataDef name="promoContentType"                 dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameContentType, 'Promo')}"/>
+
+    <!-- Promo types -->
+    <contextDataDef name="promoType10"                      dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNamePromoType, '10')}"/>
+    <contextDataDef name="promoType15"                      dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNamePromoType, '15')}"/>
+    <contextDataDef name="promoType30"                      dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNamePromoType, '30')}"/>
+
+    <!-- Audio 8ch Production Master -->
+    <contextDataDef name="audio8chTrackType"                dataType="String"       defaultDataExpression="${#picklistValue(mpMetadataFieldNameTrackType,'8ch')}"/>
+
+</workflow>

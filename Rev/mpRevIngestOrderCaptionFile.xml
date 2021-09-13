@@ -1,0 +1,178 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xsi:schemaLocation="http://schema.levelsbeyond.com.s3.amazonaws.com/latest/studio.xsd"
+          id="mpRevIngestOrderCaptionFile"
+          name="Ingest Rev.com Order Caption File"
+          executionLabelExpression="MP Ingest Order Caption - Caption Type: ${captionExtension}"
+          subjectDOClassName=""
+          group="REV"
+          showInUserInterface="false"
+          sdkVersion="">
+
+    <initialStepName>set caption file asset metadata</initialStepName>
+
+    <groovyStep name="set caption file asset metadata"
+                executionLabelExpression="Set caption file asset metadata"
+                resultDataDef="captionAssetMetadata"
+                nextStep="set caption asset links"
+                devStep="true"
+    >
+        <script>
+            <![CDATA[
+                import groovy.json.JsonOutput
+		        import com.routeto1.spring.ApplicationContextHolder
+                import com.levelsbeyond.service.inventory.MetadataService
+                MetadataService metadataService = ApplicationContextHolder.getApplicationContext().getBean(MetadataService.class)
+
+                //need to get the parent asset's metadata to pass into ingest for caption asset
+                Map parentAssetMetadata = metadataService.toMetadataSetDTO(asset.getMetadata()).getMetadata()
+
+                // initialize a new Map
+                def captionAssetMetadataMap = [:]
+
+                // construct the json
+                captionAssetMetadataMap.mpRevOrderNumber = parentAssetMetadata.mpRevOrderNumber
+                captionAssetMetadataMap.mpRevCaptionFormats = parentAssetMetadata.mpRevCaptionFormats
+
+                return JsonOutput.toJson(captionAssetMetadataMap)
+
+		]]>
+        </script>
+    </groovyStep>
+
+    <groovyStep name="set caption asset links"
+                executionLabelExpression="set caption asset links"
+                resultDataDef="captionAssetLinks"
+                nextStep="retrieve caption output"
+                devStep="true"
+    >
+        <script>
+            <![CDATA[
+                import groovy.json.JsonOutput
+		        import com.routeto1.spring.ApplicationContextHolder
+                import com.levelsbeyond.service.inventory.MetadataService
+                MetadataService metadataService = ApplicationContextHolder.getApplicationContext().getBean(MetadataService.class)
+
+                //now need to get the parent asset's link metadata into a separate json object to pass into caption ingest
+                Map parentAssetMetadata = metadataService.toMetadataSetDTO(asset.getMetadata()).getMetadata()
+
+                // initialize array to add link maps to
+                def captionAssetLinks = []
+
+                // construct the array of maps to be converted to JSON when returned
+                captionAssetLinks << [
+                    propertyName: "mpRevOrderUrl",
+                    linkInfo: [
+                        label: parentAssetMetadata.mpRevOrderUrl.findResult { it.key },
+                        url: parentAssetMetadata.mpRevOrderUrl.findResult { it.value }
+                    ]
+                ]
+
+                //return an array of json link maps
+                return captionAssetLinks.collect { link -> JsonOutput.toJson(link) }
+		]]>
+        </script>
+    </groovyStep>
+
+    <runCommandStep
+            name="retrieve caption output"
+            executionLabelExpression="Retrieving caption files from Rev.com for ${asset.name}"
+            executablePathExpression="${curlExecutablePath}"
+            stderrDataDef="captionOutputError"
+    >
+        <transition condition="${captionFile.exists()}">
+            <targetStepName>ingest caption output</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>retrieve transcript order failure</targetStepName>
+        </transition>
+        <arg>-X</arg>
+        <arg>GET</arg>
+        <arg>${captionFileUrl}</arg>
+        <arg>-H</arg>
+        <arg>Authorization: Rev ${clientApiKey}:${userApiKey}</arg>
+        <arg>-o</arg>
+        <arg>${captionFile.absolutePath}</arg>
+    </runCommandStep>
+
+
+    <executeSubflowStep name="ingest caption output"
+                        executionLabelExpression="Ingesting captions for ${asset.name}"
+                        targetWorkflowId="${subflowId}"
+                        resultDataDef="captionsAsset"
+    >
+        <transition condition="${captionsAsset != null}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>ingest caption output failure</targetStepName>
+        </transition>
+
+        <subflowContextDataMapping parentDataDef="captionFile" 		 	 subflowDataDef="fileToIngest"/>
+        <subflowContextDataMapping parentDataDef="parentCollections" 	 subflowDataDef="collections"/>
+        <subflowContextDataMapping parentDataDef="parentCategoryNames" 	 subflowDataDef="categoryNames"/>
+        <subflowContextDataMapping parentDataDef="captionAssetMetadata"  subflowDataDef="jsonMetadata"/>
+        <subflowContextDataMapping parentDataDef="captionAssetLinks"     subflowDataDef="linkMetadata"/>
+
+    </executeSubflowStep>
+
+    <noopStep name="no caption"
+              executionLabelExpression="Attachment is not a caption. Skipping ingest"
+    />
+
+    <!-- ................................................... End Steps .................................................... -->
+    <!-- failure -->
+    <failWorkflowStep name="retrieve transcript order failure"
+                      reasonExpression="Error retrieving completed transcript order. Check status for details."
+    />
+
+    <failWorkflowStep name="ingest caption output failure"
+                      reasonExpression="Error ingesting completed transcript order. Check status for details."
+    />
+    <!-- success -->
+    <noopStep name="end" />
+    <!-- ................................................... Data Defs .................................................... -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="asset"                    dataType="Data Object"  />
+
+
+    <!-- ......... PROCESSING ........... -->
+    <contextDataDef name="parentCollections" 	    dataType="Data Object"  defaultDataExpression="${asset.collectionMemberships?.![collection]}"   multiple="true"/>
+    <contextDataDef name="parentCategoryNames" 	    dataType="String"       defaultDataExpression="${asset?.categoryNames}"                         multiple="true"/>
+    <contextDataDef name="captionAssetMetadata"     dataType="JSON"         defaultDataExpression="{}" />
+    <contextDataDef name="captionAssetLinks"        dataType="JSON"         multiple="true" />
+
+    <contextDataDef name="fileName"                 dataType="String"       defaultDataExpression="${#baseFilename(asset.name)}" />
+    <contextDataDef name="captionExtension"         dataType="String"       defaultDataExpression="${#extension(captionFileUrl)}" />
+    <contextDataDef name="captionFile" 			    dataType="File" 		defaultDataExpression="${tempPath}/${fileName}.${captionExtension}" />
+    <contextDataDef name="captionFileUrl" 		    dataType="String" />
+
+    <!-- ......... Dynamic Properities ........... -->
+    <contextDataDef name="clientApiKey" 		    dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.clientApiKey')}"/>
+    <contextDataDef name="userApiKey" 			    dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.userApiKey')}"/>
+    <contextDataDef name="curlExecutablePath"	    dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.curlExecutablePath')}" />
+    <contextDataDef name="tempPath"                 dataType="String"       defaultDataExpression="${#sysconfig('filesystem.root.temp')}" />
+    <contextDataDef name="subflowId" 			    dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.mpRevIngestOrderCaptionFile.ingestSubflowId')  ?: '_anyAssetIngest'}" />
+
+    <contextDataDef name="orderResult" 			    dataType="JSON" />
+    <contextDataDef name="captionOutputError" 	    dataType="String"/>
+
+    <!-- .......... Output variables .......... -->
+    <contextDataDef name="captionsAsset" 		    dataType="Data Object" />
+</workflow>

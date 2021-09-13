@@ -1,0 +1,1048 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<xsd:schema id="FireTv-v1.11"
+    targetNamespace="http://www.amazon.com/FireTv/2014-04-11/ingestion"
+    elementFormDefault="qualified"
+    xmlns="http://www.amazon.com/FireTv/2014-04-11/ingestion"
+    xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+
+    <xsd:element name="Catalog" type="CatalogType"/>
+
+    <xsd:complexType name="CatalogType">
+        <xsd:sequence>
+            <xsd:element name="Partner" type="xsd:string">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    An identifier for the partner providing the titles in this document. If you don't know your partner ID, contact your Amazon representative.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Works" type="WorkListType">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A list of works provided by this partner. May contain Movies, TV Special, TV Shows, TV Seasons, or TV Episodes.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+        <xsd:attribute name="version" type="SchemaVersion" use="optional">
+            <xsd:annotation>
+                <xsd:documentation xml:lang="en">
+                    [Added in version 1.2]
+                    The version of the schema this catalog uses. Refer to the schema "id" to figure out which schema version you are using.
+                    Although this attribute was made optional for compatibility reasons, we recommend that you provide the version.
+                    e.g. FireTv-v1.2
+                </xsd:documentation>
+            </xsd:annotation>
+        </xsd:attribute>
+    </xsd:complexType>
+
+    <xsd:complexType name="WorkListType">
+        <xsd:sequence>
+            <xsd:choice maxOccurs="unbounded" minOccurs="0">
+                <xsd:element name="Movie" type="MovieType"/>
+                <xsd:element name="TvEpisode" type="EpisodeType"/>
+                <xsd:element name="TvSeason" type="SeasonType"/>
+                <xsd:element name="TvShow" type="ShowType"/>
+                <xsd:element name="MiniSeries" type="MiniSeriesType"/>
+                <xsd:element name="MiniSeriesEpisode" type="MiniSeriesEpisodeType"/>
+                <xsd:element name="TvSpecial" type="SpecialType"/>
+                <xsd:element name="Extra" type="ExtraType"/>
+            </xsd:choice>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="ExtraType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                [Added in version 1.3]
+                Use this type for clips or trailers.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:sequence>
+                    <xsd:element name="Type" type="ExtraTypeEnum" />
+
+                    <xsd:choice minOccurs="0">
+                        <xsd:element name="RelatesToID" type="xsd:token" maxOccurs="unbounded">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                    The token which identifies the common-work item this extra belongs to. The item with
+                                    this ID should also appear in this document.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+
+                        <xsd:element name="RelatesToExternalID" type="ExternalIDType" maxOccurs="unbounded">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                    External identifier (e.g., IMDb) which identifies the item this extra belongs to.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+
+                    </xsd:choice>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="MovieType">
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        Date and time when this item was FIRST released.
+                    </xsd:documentation>
+                </xsd:annotation>
+                <xsd:sequence>
+                    <xsd:element name="ReleaseDate" type="xsd:dateTime" minOccurs="0" />
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="SpecialType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                Use the SpecialType for one-off episodes that don't belong to traditional television hierarchies (show->season->episode) and news like episodes (for instance, Daily Shows that have a unique air-date per episode).
+                You can also use this type to represent special tv content like oscars, concerts shown on tv, or christmas special for a tv-show that doesn't belong to any season.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:sequence>
+                    <xsd:sequence minOccurs="0">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                                [Added in version 1.3]
+                                If this TV Special belongs to a show, please provide the show information (ID or Title). In addition, you will need to provide the date-time this special was originally aired. The time portion of this field is specially valuable if multiple episodes originally aired on the same day.
+                                We recommend you provide an original air date even if this item doesn't belong to any show. It will help us to match the content and make it searchable.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                        <xsd:choice minOccurs="0">
+                            <xsd:element name="ShowID" type="xsd:token" />
+                            <xsd:element name="ShowTitle" type="LocalizedString" />
+                        </xsd:choice>
+
+                        <xsd:element name="OriginalAirDate" type="xsd:dateTime" />
+                    </xsd:sequence>
+
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="ShowType">
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        Date and time when this item was FIRST released.
+                    </xsd:documentation>
+                </xsd:annotation>
+                <xsd:sequence>
+                    <xsd:element name="ReleaseDate" type="xsd:dateTime" minOccurs="0" />
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="MiniSeriesType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                [Added in version 1.3]
+                A mini series type in CDF is essentially a tv show that collects a small number of ORDERED episodes without any seasonal representation. There is no explicit limit on the number of episodes mini-series type can contain, although we generally expect it to be reasonably low.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        Date and time when this item was FIRST released.
+                    </xsd:documentation>
+                </xsd:annotation>
+                <xsd:sequence>
+                    <xsd:element name="ReleaseDate" type="xsd:dateTime" minOccurs="0" />
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="MiniSeriesEpisodeType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                [Added in version 1.3]
+                An episodic content that belongs to a MiniSeriesType. This content is not associated to any seasons, and is sequenced in the context of the mini series.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:sequence>
+                    <xsd:choice>
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                                In order to identify the series for a mini-series episode, we must have either a MiniSeriesID or MiniSeriesTitle.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                        <xsd:element name="MiniSeriesID" type="xsd:token">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                    The token which identifies the mini-series where this episode appears. The mini-series with
+                                    this ID should also appear in this document.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                        <xsd:element name="MiniSeriesTitle" type="LocalizedString">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                    Provide the mini-series title ONLY if you don't have a mini-series ID that this episode is associated with. It is generally advised to create a mini-series object with a unique id for this title, and associate all episodes of the series with that MiniSeriesID.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                    </xsd:choice>
+
+                    <xsd:element name="EpisodeInSeries" type="xsd:int">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                                The number of the episode in the context of the overall Mini Series.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                    </xsd:element>
+
+                    <xsd:element name="OriginalAirDate" type="xsd:dateTime" minOccurs="0" />
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="SeasonType">
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:sequence>
+                    <xsd:choice>
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            In order to identify a show for a season, we must have either a ShowID or ShowTitle.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                        <xsd:element name="ShowID" type="xsd:token">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                The token which identifies the show where this season appears. The show with
+                                this ID should also appear in this document.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                        <xsd:element name="ShowTitle" type="LocalizedString"/>
+                    </xsd:choice>
+
+                    <xsd:element name="SeasonInShow" type="xsd:int">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            The number of the season in the context of the overall TV show.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                    </xsd:element>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="EpisodeType">
+        <xsd:complexContent>
+            <xsd:extension base="CommonWorkType">
+                <xsd:sequence>
+                    <xsd:choice>
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            In order to identify a show for an episode, we must have either a ShowID or ShowTitle.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                        <xsd:element name="ShowID" type="xsd:token">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                The token which identifies the show where this episode appears. The show with
+                                this ID should also appear in this document.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                        <xsd:element name="ShowTitle" type="LocalizedString"/>
+                    </xsd:choice>
+
+                    <xsd:choice>
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            In order to identify the season for an episode, we must have either a ShowID or ShowTitle.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                        <xsd:element name="SeasonID" type="xsd:token">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                The token which identifies the season where this episode appears. The season with
+                                this ID should also appear in this document.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                        <xsd:element name="SeasonInShow" type="xsd:int">
+                            <xsd:annotation>
+                                <xsd:documentation xml:lang="en">
+                                The number of the season in the context of the overall TV show.
+                                </xsd:documentation>
+                            </xsd:annotation>
+                        </xsd:element>
+                    </xsd:choice>
+
+                    <xsd:element name="SeasonTitle" type="LocalizedString" minOccurs="0"/>
+                    <xsd:element name="EpisodeInSeason" type="xsd:int">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            The number of the episode in the context of the season.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                    </xsd:element>
+
+                    <xsd:element name="OriginalAirDate" type="xsd:dateTime" minOccurs="0" />
+
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="CommonWorkType">
+        <xsd:sequence>
+            <xsd:element name="ID" type="NonEmptyToken">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    An identifier for a title. This field is required, and CAN NOT be left blank. The ID must be unique amongst all content for each partner.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="ExternalID" type="ExternalIDType" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    External identifier (e.g., IMDb) for content matching.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Title" type="LocalizedString" maxOccurs="unbounded"/>
+            <xsd:element name="Copyright" type="LocalizedString" minOccurs="0"/>
+            <xsd:element name="Offers" type="OfferListType">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A list of playback offers. This can include: Free, Subscription, Paid, or Rental.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="AdultProduct" type="xsd:boolean" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    Whether the item is rated as adult-only content.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="ReleaseYear" type="xsd:int" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    The year in which the item was first released to the public, or the first airdate in the case of television.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="ReleaseInfo" type="ReleaseInfoType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    DEPRECATED. The full date when the item was first released to the public, or the first airdate in the case of television.
+                    Optionally includes a country of first release.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="ShortDescription" type="LocalizedString" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A short (2-3 line) description of the content. If you do not have a short description do not include this tag or substitute other information such as the title. 
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Synopsis" type="LocalizedString" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A description of the content. Intended to give more detail than ShortDescription. If you do not have a synopsis do not include this tag. 
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="MetadataAvailabilityDate" type="xsd:dateTime" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        Date after which metadata information should be available to viewers.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:choice minOccurs="0">
+                <xsd:element name="ImageUrl" type="WebUrlType">
+                    <xsd:annotation>
+                        <xsd:documentation xml:lang="en">
+                            DEPRECATED. (Use Images Element instead) A URL that specifies an image to represent the TV or movie content ("box art"). Images should be in JPG or PNG format (JPG preferred) and a minimum of 480 pixels in height. Larger is better; we will scale as needed. Although not enforced, please use a 3:4 aspect ratio (at least 360px wide x 480px high) for movies and 16:9 (at least 853px wide x 480px high) or 16:10 (at least 768px wide x 480px high) for TV shows/seasons/episodes. Images smaller than 480px in height and images that exceed a 2:1 or 1:2 aspect ratio will not be used. If the provided image is rejected, we will use another image source (for example, IMDb) or display a placeholder.
+                        </xsd:documentation>
+                    </xsd:annotation>
+                </xsd:element>
+                <xsd:element name="Images">
+                    <xsd:complexType>
+                        <xsd:sequence>
+                            <xsd:element name="Image" type="ImageType" maxOccurs="unbounded"/>
+                        </xsd:sequence>
+                    </xsd:complexType>
+                </xsd:element>
+            </xsd:choice>
+            <xsd:element name="RuntimeMinutes" type="xsd:int" minOccurs="0" >
+              <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                     The overall running time of the content, in minutes.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Color" type="ColorType" minOccurs="0"/>
+            <xsd:element name="Credits" type="CreditsType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    The human contributors to the work; actors, crew, etc... The same person may appear as both cast or crew multiple times.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Studios" type="StudiosType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    The studio or studios that produced the content.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Language" type="xsd:language" minOccurs="0"/>
+            <xsd:element name="CustomerRating" type="RatingType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    An average customer rating for the content (e.g. 6.6/10.0).
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Rank" type="xsd:int" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A score relative to every other item in the catalog. Lower value means that the item is ranked higher than other items that have a higher value. The highest rank an item can have is 1. It is acceptable for multiple items to have the same rank.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Source" type="SourceType" minOccurs="0"/>
+            <xsd:element name="Genres" type="GenresType" minOccurs="0"/>
+            <xsd:element name="ContentRatings" type="CertificationsType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                    A List of content ratings or certifications. Each item consists of a certifying system (e.g, MPAA) and a certification (e.g. R).
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="JP_Require18PlusAgeConfirmation" type="xsd:boolean" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        [Added in version 1.2]
+                        An optional boolean flag to mark 18+ content for the Japanese marketplace. Setting this flag to true will require viewers of this content in Japan to confirm that their age is above 18. This is based on Japan's legal requirements.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="ReleaseInfoType">
+        <xsd:sequence>
+            <xsd:element name="ReleaseDate" type="xsd:date"/>
+            <xsd:element name="ReleaseCountry" type="CountryType" minOccurs="0"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:simpleType name="SchemaVersion">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="FireTv-v1.2"/>
+            <xsd:enumeration value="FireTv-v1.3"/>
+            <xsd:enumeration value="FireTv-v1.4"/>
+            <xsd:enumeration value="FireTv-v1.5"/>
+            <xsd:enumeration value="FireTv-v1.6"/>
+            <xsd:enumeration value="FireTv-v1.7"/>
+            <xsd:enumeration value="FireTv-v1.8"/>
+            <xsd:enumeration value="FireTv-v1.9"/>
+            <xsd:enumeration value="FireTv-v1.10"/>
+            <xsd:enumeration value="FireTv-v1.11"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="NonEmptyToken">
+        <xsd:restriction base="xsd:token">
+            <xsd:minLength value="1"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="CountryType">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="AF"/>
+            <xsd:enumeration value="AX"/>
+            <xsd:enumeration value="AL"/>
+            <xsd:enumeration value="DZ"/>
+            <xsd:enumeration value="AS"/>
+            <xsd:enumeration value="AD"/>
+            <xsd:enumeration value="AO"/>
+            <xsd:enumeration value="AI"/>
+            <xsd:enumeration value="AQ"/>
+            <xsd:enumeration value="AG"/>
+            <xsd:enumeration value="AR"/>
+            <xsd:enumeration value="AM"/>
+            <xsd:enumeration value="AW"/>
+            <xsd:enumeration value="AU"/>
+            <xsd:enumeration value="AT"/>
+            <xsd:enumeration value="AZ"/>
+            <xsd:enumeration value="BS"/>
+            <xsd:enumeration value="BH"/>
+            <xsd:enumeration value="BD"/>
+            <xsd:enumeration value="BB"/>
+            <xsd:enumeration value="BY"/>
+            <xsd:enumeration value="BE"/>
+            <xsd:enumeration value="BZ"/>
+            <xsd:enumeration value="BJ"/>
+            <xsd:enumeration value="BM"/>
+            <xsd:enumeration value="BT"/>
+            <xsd:enumeration value="BO"/>
+            <xsd:enumeration value="BQ"/>
+            <xsd:enumeration value="BA"/>
+            <xsd:enumeration value="BW"/>
+            <xsd:enumeration value="BV"/>
+            <xsd:enumeration value="BR"/>
+            <xsd:enumeration value="IO"/>
+            <xsd:enumeration value="BN"/>
+            <xsd:enumeration value="BG"/>
+            <xsd:enumeration value="BF"/>
+            <xsd:enumeration value="BI"/>
+            <xsd:enumeration value="KH"/>
+            <xsd:enumeration value="CM"/>
+            <xsd:enumeration value="CA"/>
+            <xsd:enumeration value="CV"/>
+            <xsd:enumeration value="KY"/>
+            <xsd:enumeration value="CF"/>
+            <xsd:enumeration value="TD"/>
+            <xsd:enumeration value="CL"/>
+            <xsd:enumeration value="CN"/>
+            <xsd:enumeration value="CX"/>
+            <xsd:enumeration value="CC"/>
+            <xsd:enumeration value="CO"/>
+            <xsd:enumeration value="KM"/>
+            <xsd:enumeration value="CG"/>
+            <xsd:enumeration value="CD"/>
+            <xsd:enumeration value="CK"/>
+            <xsd:enumeration value="CR"/>
+            <xsd:enumeration value="CI"/>
+            <xsd:enumeration value="HR"/>
+            <xsd:enumeration value="CU"/>
+            <xsd:enumeration value="CW"/>
+            <xsd:enumeration value="CY"/>
+            <xsd:enumeration value="CZ"/>
+            <xsd:enumeration value="DK"/>
+            <xsd:enumeration value="DJ"/>
+            <xsd:enumeration value="DM"/>
+            <xsd:enumeration value="DO"/>
+            <xsd:enumeration value="EC"/>
+            <xsd:enumeration value="EG"/>
+            <xsd:enumeration value="SV"/>
+            <xsd:enumeration value="GQ"/>
+            <xsd:enumeration value="ER"/>
+            <xsd:enumeration value="EE"/>
+            <xsd:enumeration value="ET"/>
+            <xsd:enumeration value="FK"/>
+            <xsd:enumeration value="FO"/>
+            <xsd:enumeration value="FJ"/>
+            <xsd:enumeration value="FI"/>
+            <xsd:enumeration value="FR"/>
+            <xsd:enumeration value="GF"/>
+            <xsd:enumeration value="PF"/>
+            <xsd:enumeration value="TF"/>
+            <xsd:enumeration value="GA"/>
+            <xsd:enumeration value="GM"/>
+            <xsd:enumeration value="GE"/>
+            <xsd:enumeration value="DE"/>
+            <xsd:enumeration value="GH"/>
+            <xsd:enumeration value="GI"/>
+            <xsd:enumeration value="GR"/>
+            <xsd:enumeration value="GL"/>
+            <xsd:enumeration value="GD"/>
+            <xsd:enumeration value="GP"/>
+            <xsd:enumeration value="GU"/>
+            <xsd:enumeration value="GT"/>
+            <xsd:enumeration value="GG"/>
+            <xsd:enumeration value="GN"/>
+            <xsd:enumeration value="GW"/>
+            <xsd:enumeration value="GY"/>
+            <xsd:enumeration value="HT"/>
+            <xsd:enumeration value="HM"/>
+            <xsd:enumeration value="VA"/>
+            <xsd:enumeration value="HN"/>
+            <xsd:enumeration value="HK"/>
+            <xsd:enumeration value="HU"/>
+            <xsd:enumeration value="IS"/>
+            <xsd:enumeration value="IN"/>
+            <xsd:enumeration value="ID"/>
+            <xsd:enumeration value="IR"/>
+            <xsd:enumeration value="IQ"/>
+            <xsd:enumeration value="IE"/>
+            <xsd:enumeration value="IM"/>
+            <xsd:enumeration value="IL"/>
+            <xsd:enumeration value="IT"/>
+            <xsd:enumeration value="JM"/>
+            <xsd:enumeration value="JP"/>
+            <xsd:enumeration value="JE"/>
+            <xsd:enumeration value="JO"/>
+            <xsd:enumeration value="KZ"/>
+            <xsd:enumeration value="KE"/>
+            <xsd:enumeration value="KI"/>
+            <xsd:enumeration value="KP"/>
+            <xsd:enumeration value="KR"/>
+            <xsd:enumeration value="KW"/>
+            <xsd:enumeration value="KG"/>
+            <xsd:enumeration value="LA"/>
+            <xsd:enumeration value="LV"/>
+            <xsd:enumeration value="LB"/>
+            <xsd:enumeration value="LS"/>
+            <xsd:enumeration value="LR"/>
+            <xsd:enumeration value="LY"/>
+            <xsd:enumeration value="LI"/>
+            <xsd:enumeration value="LT"/>
+            <xsd:enumeration value="LU"/>
+            <xsd:enumeration value="MO"/>
+            <xsd:enumeration value="MK"/>
+            <xsd:enumeration value="MG"/>
+            <xsd:enumeration value="MW"/>
+            <xsd:enumeration value="MY"/>
+            <xsd:enumeration value="MV"/>
+            <xsd:enumeration value="ML"/>
+            <xsd:enumeration value="MT"/>
+            <xsd:enumeration value="MH"/>
+            <xsd:enumeration value="MQ"/>
+            <xsd:enumeration value="MR"/>
+            <xsd:enumeration value="MU"/>
+            <xsd:enumeration value="YT"/>
+            <xsd:enumeration value="MX"/>
+            <xsd:enumeration value="FM"/>
+            <xsd:enumeration value="MD"/>
+            <xsd:enumeration value="MC"/>
+            <xsd:enumeration value="MN"/>
+            <xsd:enumeration value="ME"/>
+            <xsd:enumeration value="MS"/>
+            <xsd:enumeration value="MA"/>
+            <xsd:enumeration value="MZ"/>
+            <xsd:enumeration value="MM"/>
+            <xsd:enumeration value="NA"/>
+            <xsd:enumeration value="NR"/>
+            <xsd:enumeration value="NP"/>
+            <xsd:enumeration value="NL"/>
+            <xsd:enumeration value="NC"/>
+            <xsd:enumeration value="NZ"/>
+            <xsd:enumeration value="NI"/>
+            <xsd:enumeration value="NE"/>
+            <xsd:enumeration value="NG"/>
+            <xsd:enumeration value="NU"/>
+            <xsd:enumeration value="NF"/>
+            <xsd:enumeration value="MP"/>
+            <xsd:enumeration value="NO"/>
+            <xsd:enumeration value="OM"/>
+            <xsd:enumeration value="PK"/>
+            <xsd:enumeration value="PW"/>
+            <xsd:enumeration value="PS"/>
+            <xsd:enumeration value="PA"/>
+            <xsd:enumeration value="PG"/>
+            <xsd:enumeration value="PY"/>
+            <xsd:enumeration value="PE"/>
+            <xsd:enumeration value="PH"/>
+            <xsd:enumeration value="PN"/>
+            <xsd:enumeration value="PL"/>
+            <xsd:enumeration value="PT"/>
+            <xsd:enumeration value="PR"/>
+            <xsd:enumeration value="QA"/>
+            <xsd:enumeration value="RE"/>
+            <xsd:enumeration value="RO"/>
+            <xsd:enumeration value="RU"/>
+            <xsd:enumeration value="RW"/>
+            <xsd:enumeration value="BL"/>
+            <xsd:enumeration value="SH"/>
+            <xsd:enumeration value="KN"/>
+            <xsd:enumeration value="LC"/>
+            <xsd:enumeration value="MF"/>
+            <xsd:enumeration value="PM"/>
+            <xsd:enumeration value="VC"/>
+            <xsd:enumeration value="WS"/>
+            <xsd:enumeration value="SM"/>
+            <xsd:enumeration value="ST"/>
+            <xsd:enumeration value="SA"/>
+            <xsd:enumeration value="SN"/>
+            <xsd:enumeration value="RS"/>
+            <xsd:enumeration value="SC"/>
+            <xsd:enumeration value="SL"/>
+            <xsd:enumeration value="SG"/>
+            <xsd:enumeration value="SX"/>
+            <xsd:enumeration value="SK"/>
+            <xsd:enumeration value="SI"/>
+            <xsd:enumeration value="SB"/>
+            <xsd:enumeration value="SO"/>
+            <xsd:enumeration value="ZA"/>
+            <xsd:enumeration value="GS"/>
+            <xsd:enumeration value="SS"/>
+            <xsd:enumeration value="ES"/>
+            <xsd:enumeration value="LK"/>
+            <xsd:enumeration value="SD"/>
+            <xsd:enumeration value="SR"/>
+            <xsd:enumeration value="SJ"/>
+            <xsd:enumeration value="SZ"/>
+            <xsd:enumeration value="SE"/>
+            <xsd:enumeration value="CH"/>
+            <xsd:enumeration value="SY"/>
+            <xsd:enumeration value="TW"/>
+            <xsd:enumeration value="TJ"/>
+            <xsd:enumeration value="TZ"/>
+            <xsd:enumeration value="TH"/>
+            <xsd:enumeration value="TL"/>
+            <xsd:enumeration value="TG"/>
+            <xsd:enumeration value="TK"/>
+            <xsd:enumeration value="TO"/>
+            <xsd:enumeration value="TT"/>
+            <xsd:enumeration value="TN"/>
+            <xsd:enumeration value="TR"/>
+            <xsd:enumeration value="TM"/>
+            <xsd:enumeration value="TC"/>
+            <xsd:enumeration value="TV"/>
+            <xsd:enumeration value="UG"/>
+            <xsd:enumeration value="UA"/>
+            <xsd:enumeration value="AE"/>
+            <xsd:enumeration value="GB"/>
+            <xsd:enumeration value="US"/>
+            <xsd:enumeration value="UM"/>
+            <xsd:enumeration value="UY"/>
+            <xsd:enumeration value="UZ"/>
+            <xsd:enumeration value="VU"/>
+            <xsd:enumeration value="VE"/>
+            <xsd:enumeration value="VN"/>
+            <xsd:enumeration value="VG"/>
+            <xsd:enumeration value="VI"/>
+            <xsd:enumeration value="WF"/>
+            <xsd:enumeration value="EH"/>
+            <xsd:enumeration value="YE"/>
+            <xsd:enumeration value="ZM"/>
+            <xsd:enumeration value="ZW"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="ColorType">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="color"/>
+            <xsd:enumeration value="black_and_white"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="SourceType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                [Added in version 1.1]
+                An enumerated value that specifies the source of content. The following types are valid:
+                    1. original: Partner produced/created this content.
+                    2. licensed: Partner did not create this content, and they license it from another studio.
+                    3. unknown: Source is unknown.
+                    4. other: Source is known but can not be classified into any of the other types in this enumeration.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="original"/>
+            <xsd:enumeration value="licensed"/>
+            <xsd:enumeration value="unknown"/>
+            <xsd:enumeration value="other"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="CreditsType">
+        <xsd:sequence>
+            <xsd:choice maxOccurs="unbounded">
+                <xsd:element name="CastMember" type="ActorType"/>
+                <xsd:element name="CrewMember" type="CrewType"/>
+            </xsd:choice>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:simpleType name="ExtraTypeEnum">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="clip"/>
+            <xsd:enumeration value="trailer"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="ActorType">
+        <xsd:complexContent>
+            <xsd:extension base="PersonType">
+                <xsd:sequence>
+                    <xsd:element name="Role" type="LocalizedString" maxOccurs="unbounded" minOccurs="0">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                                One or more strings that states what the actor's role in the content is. This could either be the name of the character they played, or "self" if they played as themselves. This field should NOT be used to specify their job, for instance "actor" or "actress".
+                                e.g.
+                                    Tom Hanks as "Forrest Gump" in Forrest Gump (1994)
+                                    John Malkovich  as "self" in Being John Malkovich (1999)
+                            </xsd:documentation>
+                        </xsd:annotation>
+                    </xsd:element>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="CrewType">
+        <xsd:complexContent>
+            <xsd:extension base="PersonType">
+                <xsd:sequence>
+                    <xsd:element name="Job" type="LocalizedString" maxOccurs="unbounded"/>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="PersonType">
+        <xsd:sequence>
+            <xsd:element name="Name" type="LocalizedString" maxOccurs="unbounded"/>
+            <xsd:element name="ExternalID" type="ExternalIDType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="RatingType">
+        <xsd:sequence>
+            <xsd:element name="Score" type="NonNegativeDecimal"/>
+            <xsd:element name="MaxValue" type="NonNegativeDecimal"/>
+            <xsd:element name="Count" type="NonNegativeLong" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        [Added in version 1.2]
+                        An optional value indicating number of users that have contributed to the score.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:simpleType name="NonNegativeDecimal">
+        <xsd:restriction base="xsd:decimal">
+          <xsd:minInclusive value="0"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="NonNegativeLong">
+        <xsd:restriction base="xsd:long">
+            <xsd:minInclusive value="0"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="StudiosType">
+        <xsd:sequence>
+            <xsd:element name="Studio" type="xsd:string" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="GenresType">
+        <xsd:sequence>
+            <xsd:element name="Genre" type="LocalizedString" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="LocalizedString">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:string">
+                <xsd:attribute name="locale" type="xsd:language" use="required"/>
+                <xsd:attribute name="pronunciation" type="xsd:string" use="optional"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="ExternalIDType">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:token">
+                <xsd:attribute name="scheme" use="required" type="ExternalIDTypeEnum"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+
+    <xsd:simpleType name="ExternalIDTypeEnum">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="imdb"/>
+            <xsd:enumeration value="tms"/>
+            <xsd:enumeration value="isan"/>
+            <xsd:enumeration value="ean"/>
+            <xsd:enumeration value="upc"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="OfferListType">
+        <xsd:sequence>
+            <xsd:choice maxOccurs="unbounded">
+                <xsd:element name="SubscriptionOffer" type="SubscriptionOfferType"/>
+                <xsd:element name="FreeOffer" type="FreeOfferType"/>
+                <xsd:element name="PurchaseOffer" type="PurchaseOfferType"/>
+                <xsd:element name="RentalOffer" type="RentalOfferType"/>
+            </xsd:choice>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="SubscriptionOfferType">
+        <xsd:complexContent>
+            <xsd:extension base="OfferBaseType"/>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="FreeOfferType">
+        <xsd:complexContent>
+            <xsd:extension base="OfferBaseType"/>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="RentalOfferType">
+        <xsd:complexContent>
+            <xsd:extension base="OfferBaseType">
+                <xsd:sequence>
+                    <xsd:element name="Price" type="PriceType"/>
+                    <xsd:element name="Duration" type="xsd:int">
+                        <xsd:annotation>
+                            <xsd:documentation xml:lang="en">
+                            Length, in hours, of rental period.
+                            </xsd:documentation>
+                        </xsd:annotation>
+                    </xsd:element>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="PurchaseOfferType">
+        <xsd:complexContent>
+            <xsd:extension base="OfferBaseType">
+                <xsd:sequence>
+                    <xsd:element name="Price" type="PriceType"/>
+                </xsd:sequence>
+            </xsd:extension>
+        </xsd:complexContent>
+    </xsd:complexType>
+
+    <xsd:complexType name="OfferBaseType">
+        <xsd:sequence>
+            <xsd:element name="Quality" type="QualityType" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        DEPRECATED. The quality (SD, HD, UHD, etc) of this offer. This has been deprecated in favor of LaunchDetails::LaunchQuality.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+
+            <xsd:element name="Regions" type="RegionsType"/>
+            <xsd:element name="WindowStart" type="xsd:dateTime" minOccurs="0"/>
+            <xsd:element name="WindowEnd" type="xsd:dateTime" minOccurs="0"/>
+            <xsd:element name="LaunchDetails" type="LaunchDetailsType" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="LaunchDetailsType">
+        <xsd:annotation>
+            <xsd:documentation xml:lang="en">
+                [Added in version 1.2]
+                Group of attributes that you can launch a piece of content with, optionally including an identifier that does not need to be the same as the common work identifier.
+            </xsd:documentation>
+        </xsd:annotation>
+        <xsd:sequence>
+            <xsd:element name="Quality" type="QualityType" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        The video qualities that the content can be launched with.
+                        e.g. HD, SD, UHD, etc.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="AudioLanguage" type="xsd:language" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        The Audio Languages (original language or dubbed languages) that the content can be launched with.
+                        e.g. en-us, en-ca, etc.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="Subtitle" type="xsd:language" minOccurs="0" maxOccurs="unbounded">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        The Subtitles that the content can be launched with.
+                        e.g. en, es, etc.
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+            <xsd:element name="LaunchId" type="xsd:token" minOccurs="0">
+                <xsd:annotation>
+                    <xsd:documentation xml:lang="en">
+                        An identifier that the Fire TV will use to launch this content with the quality, audio, subtitle combination specified in this group. If no value is specified, the common work's ID will be used to launch this content. This field is provided so that you can use a single identifier for content(s) that have the same metadata but differ in encoding audio (dubbed), quality, and subtitles. Using this field, you can specify the actual identifier that launches content with any combination.
+                        e.g.
+                            tt0499549 is the identifier for Avatar (2009). To launch it with Spanish audio and Spanish subtitles in HD, you could use an LaunchId like this: tt0499549:en-us:en:HD
+                    </xsd:documentation>
+                </xsd:annotation>
+            </xsd:element>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="RegionsType">
+        <xsd:sequence maxOccurs="unbounded">
+            <xsd:element name="Country" type="CountryType"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:simpleType name="QualityType">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="SD"/>
+            <xsd:enumeration value="HD"/>
+            <xsd:enumeration value="UHD"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:simpleType name="WebUrlType">
+        <xsd:restriction base="xsd:anyURI">
+            <xsd:pattern value="(http|HTTP)(s|S)*://.*" />
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="ImageType">
+        <xsd:sequence>
+            <xsd:element name="Url" type="WebUrlType"/>
+            <xsd:element name="Locale" type="xsd:language" minOccurs="0" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="PriceType">
+        <xsd:simpleContent>
+            <xsd:extension base="xsd:float">
+                <xsd:attribute name="currency" type="CurrencyType" use="required"/>
+            </xsd:extension>
+        </xsd:simpleContent>
+    </xsd:complexType>
+
+    <xsd:simpleType name="CurrencyType">
+        <xsd:restriction base="xsd:string">
+            <xsd:enumeration value="USD"/>
+            <xsd:enumeration value="GBP"/>
+            <xsd:enumeration value="JPY"/>
+            <xsd:enumeration value="EUR"/>
+        </xsd:restriction>
+    </xsd:simpleType>
+
+    <xsd:complexType name="CertificationsType">
+        <xsd:sequence>
+            <xsd:element name="ContentRating" type="CertificationType" maxOccurs="unbounded"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+    <xsd:complexType name="CertificationType">
+        <xsd:sequence>
+            <xsd:element name="System" type="xsd:string"/>
+            <xsd:element name="Certification" type="xsd:string"/>
+        </xsd:sequence>
+    </xsd:complexType>
+
+</xsd:schema>

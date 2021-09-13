@@ -1,0 +1,114 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2021 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="cleanEmptyDirectoryTree"
+	name="Clean Empty Directory Tree"
+	executionLabelExpression="Clean Empty Directory Tree - "
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion=""
+>
+
+	<initialStepName>check input</initialStepName>
+ 
+	<noopStep name="check input">
+		<transition condition="${!baseDirString.startsWith('/')}">
+			<targetStepName>not a local filesystem</targetStepName>
+		</transition>
+		<transition condition="${!childDirString.startsWith(baseDirString)}">
+			<targetStepName>child directory is not a child of the base directory</targetStepName>
+		</transition>
+		<transition condition="${baseDirString.length() >= childDirString.length()}">
+			<targetStepName>child directory is not a child of the base directory</targetStepName>
+		</transition>
+		<transition condition="${childBaseChar != '/'}">
+			<targetStepName>child directory is not a child of the base directory</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>make sure there is a placeholder file in the root directory</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<!-- This will prevent the base directory and any of it's parent directories from being accidently removed.  It makes sure the base directory is not empty -->
+	<!-- We won't remove the placeholder file because it could cause a race condition where another simeultaneously executing clean up would cause the root to be removed -->
+	<runCommandStep name="make sure there is a placeholder file in the root directory"
+		executionLabelExpression="Make sure placeholder exists in root directory - &quot;${baseDirString}/.placeholder&quot;"
+		executablePathExpression="/usr/bin/touch"
+		nextStep="try to remove empty directories in tree">
+		<arg>${baseDirString}/.placeholder</arg>
+	</runCommandStep>
+	
+	<!-- This next step executes the unix command "mkdir -p <childDirectory>" which will remove the child directory if it is empty and then any subsequently empty parent directories -->
+	<!-- Since we created the empty placeholder file using "touch" in the previous step it will prevent the base directory from being removed -->
+    <runCommandStep name="try to remove empty directories in tree"
+	    executionLabelExpression="Remove directory if empty and it's subsequent empty parent directories - &quot;${childDirString}&quot;"
+	    executablePathExpression="/bin/rmdir"
+	    resultCodeDataDef="resultCodeRm"
+	    stdoutDataDef="stdoutStrRm"
+	    stderrDataDef="stderrStrRm"
+	    continueOnException="true"
+	    nextStep="make sure the base directory still exists">
+	    <arg>-p</arg>
+	    <arg>${childDirString}</arg>
+    </runCommandStep>
+	
+	<!-- While this is probably unnecessary because we created the placeholder directory, if someone happens to delete the placeholder by hand while this is running it will rebuild -->
+	<!-- any missing directories up to the base directory -->
+	<runCommandStep name="make sure the base directory still exists"
+		executionLabelExpression="Make sure the base directory still exists - &quot;${baseDirString}&quot;"
+		executablePathExpression="/bin/mkdir"
+		resultCodeDataDef="resultCodeMk"
+		stdoutDataDef="stdoutStrMk"
+		stderrDataDef="stderrStrMk"
+		continueOnException="true"
+		nextStep="end">
+		<arg>-p</arg>
+		<arg>${baseDirString}</arg>
+	</runCommandStep>
+	
+    <!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<!-- failure -->
+	<noopStep name="not a local filesystem"
+		executionLabelExpression="Not a local filesystem: &quot;${baseDirString}&quot;."/>
+	
+	<noopStep name="child directory is not a child of the base directory"
+		executionLabelExpression="Child &quot;${childDirString}&quot; is not a child of the base directory &quot;${baseDirectory}&quot;." />
+
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef name="baseDirectory" dataType="Directory" required="true" />
+	<contextDataDef name="childDirectory" dataType="Directory" required="true" />
+	
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef name="baseDirString" dataType="String" defaultDataExpression="${baseDirectory.absolutePath.replaceAll('/$','')}"/>
+	<contextDataDef name="childDirString" dataType="String" defaultDataExpression="${childDirectory.absolutePath}" />
+	<contextDataDef name="resultCodeRm" dataType="Integer" />
+	<contextDataDef name="stdoutStrRm" dataType="String" />
+	<contextDataDef name="stderrStrRm" dataType="String" />
+	<contextDataDef name="resultCodeMk" dataType="Integer" />
+	<contextDataDef name="stdoutStrMk" dataType="String" />
+	<contextDataDef name="stderrStrMk" dataType="String" />
+	<contextDataDef name="childBaseChar" dataType="String" defaultDataExpression="${childDirString.charAt(baseDirString.length())}" />
+
+</workflow>

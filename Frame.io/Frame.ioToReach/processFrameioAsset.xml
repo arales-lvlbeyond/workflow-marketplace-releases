@@ -1,0 +1,275 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="processFrameioAsset"
+          name="Process Frame.io Asset"
+          executionLabelExpression="Processing Frame.io Asset ID: ${assetJSON.id}"
+          description=""
+          adminOnly="true"
+          showInUserInterface="false"
+          group="Frame.io"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion=""
+>
+
+    <initialStepName>check asset type</initialStepName>
+
+    <noopStep name="check asset type"
+              executionLabelExpression="Asset type: ${assetJSON.type}">
+        <transition condition="${assetJSON.type.equals('folder')}">
+            <targetStepName>process folder</targetStepName>
+        </transition>
+        <transition condition="${assetJSON.type.equals('version_stack')}">
+            <targetStepName>get latest version</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>check for existing frame ID</targetStepName>
+        </transition>
+    </noopStep>
+
+    <submitHttpStep name="get latest version"
+                    urlExpression="${frameioURL}/v2/assets/${assetJSON.cover_asset_id}"
+                    requestMethodExpression="GET"
+                    responseCodeDataDef="frameioLatestVersionResponseCode"
+                    responsePayloadDataDef="frameioLatestVersionResponseJSON"
+                    nextStep="process latest version"
+        >
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <executeSubflowStep name="process latest version"
+                        targetWorkflowId="processFrameioAsset"
+                        subjectChangePath="${frameioLatestVersionResponseJSON}"
+                        subflowTargetDataDef="assetJSON"
+                        nextStep="delete Frame.io asset">
+        <subflowContextDataMapping parentDataDef="deleteLatestVersion" subflowDataDef="delete"/>
+    </executeSubflowStep>
+
+    <executeSubflowStep name="process folder"
+                        targetWorkflowId="pullFromFrameIO"
+                        subjectChangePath="${assetJSON.id}"
+                        subflowTargetDataDef="rootAssetID"
+                        nextStep="end"/>
+
+    <queryStep name="check for existing frame ID"
+               executionLabelExpression="Look for Reach Asset with Frame.io ID ${frameioId}"
+               targetDataObjectClass="AssetMaster"
+               resultDataDef="existingReachAsset"
+               >
+        <transition condition="${ existingReachAsset != null AND assetJSON.versions == 0 AND assetJSON.type == 'file' }">
+            <targetStepName>Save frameioStatus</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>set assetVersion</targetStepName>
+        </transition>
+        
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="metadata.frameioID" op="eq">
+                            <test value="${frameioId}"/>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+    <setContextData name="set assetVersion"
+                    targetDataDef="assetVersion"
+                    valueExpression="${existingReachAsset != null ? existingReachAsset.currentVersion : null}"
+                    nextStep="create unique dir">
+    </setContextData>
+
+    <runCommandStep name="create unique dir"
+		executablePathExpression="/bin/mkdir"
+		continueOnException="true"
+		executionLabelExpression="Create directory: ${uniqueDir.absolutePath}"
+		>
+		<transition condition="${uniqueDir.exists()}">
+			<targetStepName>download file</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>failed to create destination</targetStepName>
+		</transition>
+
+		<arg>-p</arg>
+		<arg>${uniqueDir.absolutePath}</arg>
+	</runCommandStep>
+
+    <runCommandStep name="download file"
+                    executionLabelExpression="Downloading ${frameioAssetUrl} to ${tempPath}"
+                    executablePathExpression="/usr/bin/wget"
+                    nextStep="ingest file">
+        <arg>${assetJSON.original}</arg>
+        <arg>-O</arg>
+        <arg>${downloadedFile.absolutePath}</arg>
+    </runCommandStep>
+
+    <setContextData name="set download result"
+                    targetDataDef="downloadedFile"
+                    valueExpression="${downloadResponsePayload}"
+                    nextStep="ingest file"/>
+
+    <executeSubflowStep name="ingest file"
+                        targetWorkflowId="${ingestSubflow}"
+                        subjectChangePath="${downloadedFile}"
+                        resultDataDef="newAssetMaster"
+                        subflowTargetDataDef="fileToIngest"
+                        executionLabelExpression="Ingest file (${fileToIngest.name}) and create version for asset (${subject.name})"
+                        pctComplete="99"
+                        nextStep="Save frameioStatus"
+    >
+        <!-- ingest -->
+        <subflowContextDataMapping parentDataDef="assetVersion" subflowDataDef="assetVersion"/>
+        <subflowContextDataMapping parentDataDef="versionDuplicate" subflowDataDef="versionDuplicate"/>
+        <subflowContextDataMapping parentDataDef="collection" subflowDataDef="collections"/>
+        <subflowContextDataMapping parentDataDef="categoryNames" subflowDataDef="categoryNames"/>
+        <subflowContextDataMapping parentDataDef="categories" subflowDataDef="categories"/>
+    </executeSubflowStep>
+
+    <nimbus:setMetadataValueStep name="Save frameioStatus"
+        targetExpression="${newAssetMaster}"
+        propertyNameExpression="${frameioStatusFieldName}"
+        valueExpression="${#picklistValue(frameioStatusFieldName, 'Approved')}"
+        nextStep="Set frameioUrl Field"/>
+    
+    <setAssociationMetadataStep name="Set frameioUrl Field"
+        targetExpression="${newAssetMaster}"
+        propertyNameExpression="frameioURL"
+        valueExpression="{&quot;title&quot;: &quot;https://app.frame.io/player/${frameioId}&quot;, &quot;url&quot;: &quot;https://app.frame.io/player/${frameioId}&quot;}"
+        nextStep="Save Frame.io ID"
+    />
+
+    <nimbus:setMetadataValueStep name="Save Frame.io ID"
+                                 targetExpression="${newAssetMaster}"
+                                 propertyNameExpression="frameioID"
+                                 valueExpression="${frameioId}"
+                                 nextStep="check comments settings"
+    />
+
+    <!-- STEP 3 -->
+    <!-- Based on the workflow configuration (dynamic properties) we are retrieving the Frame.io comments for this asset -->
+    <noopStep name="check comments settings"
+        executionLabelExpression="Retrieve Frame.io comments? ${frameioCommentsEnabled}"
+        devStep="true"
+    >
+        <transition condition="${frameioCommentsEnabled == true}">
+            <targetStepName>get frame.io comments</targetStepName>
+        </transition>
+        <transition condition="${delete}">
+            <targetStepName>delete Frame.io asset</targetStepName>
+        </transition>
+        <transition condition="${uniqueDir.exists()}">
+            <targetStepName>delete temp file</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <executeSubflowStep name="get frame.io comments"
+        executionLabelExpression="Get Frame.io comments for ${newAssetMaster.name}"
+        targetWorkflowId="getFrameioComments"
+        subjectChangePath="${newAssetMaster}"
+    >
+        <transition condition="${delete}">
+            <targetStepName>delete Frame.io asset</targetStepName>
+        </transition>
+        <transition condition="${uniqueDir.exists()}">
+            <targetStepName>delete temp file</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="frameioId" subflowDataDef="frameioId"/>
+    </executeSubflowStep>
+    
+    <!-- STEP 4 -->
+    <!-- As part of the subflow, once asset is ingested we need to delete it from the Frame.io Project -->
+    <submitHttpStep name="delete Frame.io asset"
+        urlExpression="${frameioURL}/v2/assets/${frameioId}"
+        requestMethodExpression="DELETE"
+        responseCodeDataDef="frameioResponseCode"
+        responsePayloadDataDef="frameioResponseJSON"
+    >
+        <transition condition="${uniqueDir.exists()}">
+            <targetStepName>delete temp file</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+
+
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <deleteFileStep name="delete temp file"
+        sourceFilesExpression="${uniqueDir}"
+        executionLabelExpression="Remove ${downloadedFile.absolutePath}"
+        nextStep="end"
+    />
+    
+    <!-- End Steps -->
+    <noopStep name="end"/>
+
+    <failWorkflowStep name="failed to create destination" reasonExpression="mkdir failed" />
+
+    <!--  Input   -->
+    <contextDataDef name="assetJSON" dataType="JSON"/>
+    <contextDataDef name="frameioId" dataType="String" defaultDataExpression="${assetJSON.id}"/>
+    <contextDataDef name="delete"    dataType="Boolean" defaultDataExpression="${#sysconfig('workflow.frameio.deleteFileOption') ?: false}"/>
+    <contextDataDef name="collection" dataType="Data Object"/>
+    <contextDataDef name="categoryNames" dataType="String" multiple="true"/>
+    <contextDataDef name="categories" dataType="Data Object" multiple="true"/>
+    
+    <!-- Internal -->
+    <contextDataDef name="uniqueDir" dataType="Directory" defaultDataExpression="${tempPath}${tempPath.endsWith('/') ? '' : '/'}${#uuid()}/"/>
+    <contextDataDef name="downloadedFile" dataType="File" defaultDataExpression="${uniqueDir.absolutePath}/${fileName}"/>
+    <contextDataDef name="versionDuplicate"         dataType="Boolean"          defaultDataExpression="${#sysconfig('workflows.default.sourceIngest.versionDuplicate') ?: false}"/>
+    <contextDataDef name="existingReachAsset" dataType="Data Object"/>
+    <contextDataDef name="assetVersion" dataType="Data Object"/>
+    <contextDataDef name="newAssetMaster" dataType="Data Object" defaultDataExpression="${existingReachAsset}"/>
+
+    <!--  Defaults  -->
+    <contextDataDef name="tempPath"                 dataType="String"      defaultDataExpression="${#sysconfig('filesystem.root.temp')}"/>
+    <contextDataDef name="fileName"                 dataType="String"       defaultDataExpression="${assetJSON.name}" />
+    <contextDataDef name="frameBearer"  dataType="String" hidden="true" defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"/>
+    <contextDataDef name="frameioURL"   dataType="String"       defaultDataExpression="https://api.frame.io"/>
+    <contextDataDef name="ingestSubflow"    dataType="String" defaultDataExpression="${#sysconfig('workflows.default.ingestAssetWorkflow') ?: '_anyAssetIngest'}"/>
+    <contextDataDef name="frameioStatusFieldName"   dataType="String"       defaultDataExpression="${#sysconfig('workflow.field.names.frameioStatus') ?: 'frameioStatus'}"/>
+    <contextDataDef name="deleteLatestVersion"      dataType="Boolean"      defaultDataExpression="${#sysconfig('workflow.frameio.deleteFileOption') ?: false}"/>
+    <contextDataDef name="frameioCommentsEnabled" dataType="Boolean" defaultDataExpression="${#sysconfig('workflow.frameio.getComments') ?: 'false'}" />
+
+    <!-- Responses -->
+    <contextDataDef name="downloadResponseCode" dataType="Integer"/>
+    <contextDataDef name="downloadResponsePayload" dataType="String"/>
+    <contextDataDef name="frameioResponseCode"      dataType="Integer"/>
+    <contextDataDef name="frameioResponseJson"      dataType="JSON"/>
+    <contextDataDef name="frameioLatestVersionResponseCode"      dataType="Integer"/>
+    <contextDataDef name="frameioLatestVersionResponseJSON"      dataType="JSON"/>
+</workflow>

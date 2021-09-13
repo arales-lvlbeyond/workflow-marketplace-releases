@@ -1,0 +1,347 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="parseRekognitionData"
+          name="Parse Rekognition Data"
+          executionLabelExpression="Parse Rekognition Data - ${#filename(jsonFile.absolutePath)}${assetMaster != null ? ' - For - ' + assetMaster.name : ''}"
+          description="Parse Rekognition data to create jsonData. Create picklist items if they do not exist as part of the parsing logic."
+          resultDataDef="timeline"
+          showInUserInterface="false"
+          subjectDOClassName="AssetMaster"
+          subjectQualifierExpression=""
+          sdkVersion="">
+
+    <initialStepName>parse json</initialStepName>
+
+    <groovyStep
+            name="parse json"
+            executionLabelExpression="Parse json.. Result = [ ${jsonData.toString()} ]"
+            pctComplete="20"
+            resultDataDef="jsonData">
+        <transition condition="${assetMaster != null and jsonData.videoMeta.size() > 0}">
+            <targetStepName>set asset metadata</targetStepName>
+        </transition>
+        <transition condition="${assetMaster != null and assetMaster.assetType.toLowerCase() == 'video' and (jsonData.clips.size() > 0 or jsonData.markers.size() > 0)}">
+            <targetStepName>set clip and marker jsons</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>all this json data with no where to go</targetStepName>
+        </transition>
+        <script>
+            <![CDATA[
+            import groovy.json.JsonSlurper
+
+            videoMeta = jsonData.putObject('videoMeta')
+            clips = jsonData.putArray('clips')
+            markers = jsonData.putArray('markers')
+
+            for (picklist in picklistIds.fields()) {
+                if (rekognitionData.has(picklist.key) && rekognitionData.get(picklist.key).size() > 0) {
+                    metaProperty = picklist.key.substring(0, 1).toLowerCase() + picklist.key.substring(1)
+                    videoMetaArray = videoMeta.putArray(metaProperty)
+                    for (field in rekognitionData.get(picklist.key).fields()) {
+                        // The video gets metadata always.
+                        picklistValue = processPicklistItem(picklist.key, field.key)
+                        videoMetaArray.add(picklistValue)
+                        confidence = rekognitionData.get(picklist.key).get(field.key).Confidence.doubleValue()
+
+                        // Now check for markers/clips
+                        for (timeline in rekognitionData.get(picklist.key).get(field.key).Timelines) {
+                            startSeconds = timeline.In.intValue()
+                            endSeconds = timeline.Out.intValue()
+
+                            if (startSeconds == endSeconds && startSeconds != 0) {
+                                // Marker
+                                newMarker = markers.addObject()
+                                newMarker.put('name', field.key + ' ' + getTimeString(startSeconds))
+                                newMarker.put('startSeconds', startSeconds / 1000)
+                                markerMeta = newMarker.putObject('metadata')
+                                markerMeta.put('confidence', confidence * 100)
+                                markerMetaArray = markerMeta.putArray(metaProperty)
+                                markerMetaArray.add(picklistValue)
+                            } else if (startSeconds != endSeconds) {
+                                // Clip
+                                newClip = clips.addObject()
+                                newClip.put('name', field.key + ' ' + getTimeString(startSeconds) + ' - ' + getTimeString(endSeconds))
+                                newClip.put('startSeconds', startSeconds / 1000)
+                                newClip.put('endSeconds', endSeconds / 1000)
+                                clipMeta = newClip.putObject('metadata')
+                                clipMeta.put('confidence', confidence * 100)
+                                clipMetaArray = clipMeta.putArray(metaProperty)
+                                clipMetaArray.add(picklistValue)
+                            }
+                        }
+
+                    }
+                }
+            }
+
+            String getTimeString(int totalMilliseconds) {
+                Integer resultMilliseconds = totalMilliseconds % 1000
+                totalMilliseconds /= 1000;
+
+                Integer seconds = totalMilliseconds % 60;
+                totalMilliseconds /= 60;
+
+                Integer minutes = totalMilliseconds % 60;
+                totalMilliseconds /= 60;
+
+                Integer hours = totalMilliseconds;
+
+                return String.format("%02d", hours) + ':' + String.format("%02d", minutes) + ':' + String.format("%02d", seconds) + '.' + String.format("%03d", resultMilliseconds)
+            }
+
+            String processPicklistItem(String idKey, String label) {
+                picklistId = picklistIds.get(idKey).asText()
+
+                picklistItems = new JsonSlurper().parseText(queryReach('GET', '/reachengine/api/metadata-properties/' + picklistId + '/picklist-items?limit=50000', null))
+
+                for (item in picklistItems) {
+                    if (item.displayName == label) {
+                        return item.id
+                    }
+                }
+
+                // Not already in the picklist- add it
+                addPicklistItemResult = queryReach('PUT', '/reachengine/api/metadata-properties/' + picklistId + '/add-picklist-items', '[{"displayName":"' + label + '"}]')
+
+                if (addPicklistItemResult) {
+                    newPicklistItem = new JsonSlurper().parseText(addPicklistItemResult)
+                    return newPicklistItem[0].id
+                }
+            }
+
+            return jsonData
+
+            String queryReach(String method, String uri, String body) {
+                connection = new URL(reachUrl + uri).openConnection()
+                connection.setRequestProperty("Content-Type", "application/json")
+                connection.setRequestProperty("apiKey", workflowApiKey)
+                // connection.setRequestProperty("auth_user", "workflow")
+                // connection.setRequestProperty("auth_password", "LE5YMFq6")
+                connection.setRequestProperty("api-version", "2.0")
+
+                if ((method == 'POST' || method == 'PUT') && body != null) {
+                    connection.setRequestMethod(method)
+                    connection.setDoOutput(true)
+                    connection.getOutputStream().write(body.getBytes("UTF-8"))
+                }
+
+                responseCode = connection.responseCode
+                if (responseCode.equals(200)) {
+                    return connection.inputStream.text
+                } else {
+                    println 'Query Reach Response Code = ' + responseCode
+                    return null
+                }
+            }
+            ]]>
+        </script>
+    </groovyStep>
+
+    <setContextData
+            name="set asset metadata"
+            pctComplete="22"
+            devStep="true"
+            targetDataDef="assetMetadata"
+            valueExpression="${jsonData.videoMeta}"
+            nextStep="add metadata to asset"/>
+
+    <saveDataObjectStep
+            name="add metadata to asset"
+            pctComplete="25"
+            executionLabelExpression="Add metadata to ${assetMaster.name} - [ ${assetMetadata.toString()} ]"
+            dataObjectExpression="${assetMaster.metadata}"
+            jsonValuesDataDef="assetMetadata"
+            nextStep="create timeline"/>
+
+    <nimbus:createTimelineStep
+            name="create timeline"
+            executionLabelExpression="Create Timeline - ${timeline.name}"
+            categoryExpression="${categoryName}"
+            pctComplete="35"
+            nameExpression="${#baseFilename(assetMaster.name)}"
+            formatExpression="SMPTE"
+            resultDataDef="timeline"
+            nextStep="set timeline metadata"/>
+
+    <saveDataObjectStep
+            name="set timeline metadata"
+            devStep="true"
+            dataObjectExpression="${timeline.metadata}"
+            nextStep="add video to timeline">
+        <property name="demoTemp">${true}</property>
+    </saveDataObjectStep>
+
+    <nimbus:addAssetToTimelineStep
+            name="add video to timeline"
+            pctComplete="40"
+            executionLabelExpression="Add video ${assetMaster.name} to Timeline ${timeline.name}"
+            targetAssetExpression="${assetMaster}"
+            targetTimelineExpression="${timeline}">
+        <transition condition="${assetMaster.assetType.toLowerCase() == 'video' and (jsonData.clips.size() > 0 or jsonData.markers.size() > 0)}">
+            <targetStepName>set clip and marker jsons</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </nimbus:addAssetToTimelineStep>
+
+
+    <!-- START Timeline Clip(s) Creation -->
+    <setContextData
+            name="set clip and marker jsons"
+            pctComplete="30"
+            devStep="true">
+        <transition condition="${clipJsons.size() > 0}">
+            <targetStepName>create clip</targetStepName>
+        </transition>
+        <transition condition="${markerJsons.size() > 0}">
+            <targetStepName>create marker</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <set targetDataDef="clipJsons" valueExpression="${jsonData.clips}"/>
+        <set targetDataDef="markerJsons" valueExpression="${jsonData.markers}"/>
+    </setContextData>
+
+    <saveDataObjectStep
+            name="create clip"
+            pctComplete="60"
+            executionLabelExpression="Create Clip - '${clipJsons[clipCounter].name}'"
+            targetDataObjectClass="Clip"
+            resultDataDef="clip"
+            nextStep="set clip metadata">
+        <property name="name">${clipJsons[clipCounter].name}</property>
+        <property name="timeline">${timeline}</property>
+        <property name="timelineStartOffset">${clipJsons[clipCounter].startSeconds}</property>
+        <property name="timelineEndOffset">${clipJsons[clipCounter].endSeconds}</property>
+    </saveDataObjectStep>
+
+    <setContextData
+            name="set clip metadata"
+            devStep="true"
+            targetDataDef="clipMetadata"
+            valueExpression="${clipJsons[clipCounter].metadata}"
+            nextStep="save clip metadata"/>
+
+    <saveDataObjectStep
+            name="save clip metadata"
+            devStep="true"
+            executionLabelExpression="Save metadata on clip ${clip.name}: [ ${clipMetadata.toString()} ]"
+            dataObjectExpression="${clip.metadata}"
+            jsonValuesDataDef="clipMetadata"
+            nextStep="update clip counter"/>
+
+    <setContextData
+            name="update clip counter"
+            devStep="true"
+            targetDataDef="clipCounter"
+            valueExpression="${clipCounter + 1}">
+        <transition condition="${clipCounter &lt; clipJsons.size()}">
+            <targetStepName>create clip</targetStepName>
+        </transition>
+        <transition condition="${markerJsons.size() > 0}">
+            <targetStepName>create marker</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </setContextData>
+    <!-- END Timeline Clip(s) Creation -->
+
+    <!-- START Timeline Marker(s) Creation -->
+    <saveDataObjectStep
+            name="create marker"
+            executionLabelExpression="Create Marker - '${markerJsons.get(markerCounter).name}'"
+            pctComplete="80"
+            targetDataObjectClass="Marker"
+            resultDataDef="marker"
+            nextStep="set marker metadata">
+        <property name="name">${markerJsons.get(markerCounter).name}</property>
+        <property name="timeline">${timeline}</property>
+        <property name="timelineStartOffset">${markerJsons.get(markerCounter).startSeconds}</property>
+    </saveDataObjectStep>
+
+    <setContextData
+            name="set marker metadata"
+            devStep="true"
+            targetDataDef="markerMetadata"
+            valueExpression="${markerJsons.get(markerCounter).metadata}"
+            nextStep="save marker metadata"/>
+
+    <saveDataObjectStep
+            name="save marker metadata"
+            executionLabelExpression="Save metadata on marker ${marker.name}: [ ${markerMetadata.toString()} ]"
+            dataObjectExpression="${marker.metadata}"
+            jsonValuesDataDef="markerMetadata"
+            nextStep="update marker counter"/>
+
+    <setContextData
+            name="update marker counter"
+            devStep="true"
+            targetDataDef="markerCounter"
+            valueExpression="${markerCounter + 1}">
+        <transition condition="${markerCounter &lt; markerJsons.size()}">
+            <targetStepName>create marker</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </setContextData>
+    <!-- END Timeline Marker(s) Creation -->
+
+
+    <noopStep name="all this json data with no where to go"/>
+    <noopStep name="end"/>
+
+    <!-- Input -->
+    <contextDataDef name="jsonFile" dataType="File" userInput="true" required="true"/>
+    <contextDataDef name="assetMaster" dataType="Data Object" defaultDataExpression="${subject}"/>
+    <contextDataDef name="categoryName" dataType="String"/>
+
+    <!-- Internal -->
+    <contextDataDef name="timelineAssets" dataType="Data Object" multiple="true" defaultDataExpression="${assetMaster != null ? assetMaster.timelineAssets : null}"/>
+    <contextDataDef name="timeline" dataType="Data Object"/>
+
+    <contextDataDef name="rekognitionData" dataType="JSON" defaultDataExpression="${jsonFile}"/>
+    <contextDataDef name="jsonData" dataType="JSON" defaultDataExpression="{}"/>
+    <contextDataDef name="assetMetadata" dataType="JSON"/>
+    <contextDataDef name="clipMetadata" dataType="JSON"/>
+    <contextDataDef name="markerMetadata" dataType="JSON"/>
+
+    <contextDataDef name="clip" dataType="Data Object"/>
+    <contextDataDef name="marker" dataType="Data Object"/>
+    <contextDataDef name="clipJsons" dataType="JSON" multiple="true"/>
+    <contextDataDef name="markerJsons" dataType="JSON" multiple="true"/>
+    <contextDataDef name="clipCounter" dataType="Integer" defaultDataExpression="0"/>
+    <contextDataDef name="markerCounter" dataType="Integer" defaultDataExpression="0"/>
+
+    <contextDataDef name="reachUrl" dataType="String" defaultDataExpression="${#sysconfig('reachengine.url')}"/>
+    <contextDataDef name="workflowApiKey" dataType="String" defaultDataExpression="${#sysconfig('workflow.api.key')}"/>
+
+    <!-- Must all be multi picklists -->
+    <contextDataDef name="celebritiesId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.celebrities')}"/>
+    <contextDataDef name="emotionsId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.emotions')}"/>
+    <contextDataDef name="labelsId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.labels')}"/>
+    <contextDataDef name="keyPhrasesId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.keyPhrases')}"/>
+    <contextDataDef name="locationsId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.locations')}"/>
+    <contextDataDef name="personsId" dataType="String" defaultDataExpression="${#sysconfig('metadata.picklist.id.persons')}"/>
+
+    <contextDataDef name="picklistIds" dataType="JSON">
+        <defaultDataExpression>
+            <![CDATA[
+            {
+                Celebrities: "${celebritiesId}",
+                Emotions: "${emotionsId}",
+                Labels: "${labelsId}",
+                KeyPhrases: "${keyPhrasesId}",
+                Locations: "${locationsId}",
+                Persons: "${personsId}"
+            }
+            ]]>
+        </defaultDataExpression>
+    </contextDataDef>
+</workflow>

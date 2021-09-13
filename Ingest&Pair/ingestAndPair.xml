@@ -1,0 +1,297 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="ingestAndPair"
+	name="Ingest and Pair"
+	executionLabelExpression="Ingest Asset and Pair"
+	subjectDOClassName=""
+	resultDataDef=""
+	showInUserInterface="true"
+	sdkVersion=""
+>
+	
+	<initialStepName>check if workflow is running</initialStepName>
+	
+	
+	<!-- ................................................... Initial Checks .................................................... -->
+	<queryStep name="check if workflow is running"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Is a workflow running on this directory already? ${currentExecutions.size() != 0}">
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>ingest file on local system</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<!-- Ingest file on local file system and assign proper metadata -->
+	<executeSubflowStep name="ingest file on local system"
+		executionLabelExpression="Ingesting asset on this system"
+		targetWorkflowId="${ingestSubflow}"
+		waitForCompletionExpression="true"
+		resultDataDef="assetMaster"
+		nextStep="get asset content metadata">
+		<subflowContextDataMapping parentDataDef="fileToIngest"             subflowDataDef="fileToIngest" />
+		<subflowContextDataMapping parentDataDef="collections"              subflowDataDef="collections"/>
+		<subflowContextDataMapping parentDataDef="categories"               subflowDataDef="categories"/>
+		<subflowContextDataMapping parentDataDef="asyncProxiesFlag"         subflowDataDef="asyncProxiesFlag" />
+	</executeSubflowStep>
+	
+	<setContextData name="get asset content metadata"
+		targetDataDef="contentMetadata"
+		valueExpression="${content?.metadataSource?.metadataSource}" >
+		<!-- Check if on AWS or on local -->
+		<!-- if AWS, use eTag -->
+		<transition condition="${assetMaster.originalContent.file.absolutePath.startsWith('s3:')}">
+			<targetStepName>get eTag</targetStepName>
+		</transition>
+		<!-- If local use sha1 -->
+		<transition condition="${true}">
+			<targetStepName>assign sha1</targetStepName>
+		</transition>
+	</setContextData>
+	
+	
+	<!-- .......................... AWS use eTag .......................... -->
+	<groovyStep name="get eTag"
+		resultDataDef="eTag"
+		nextStep="save eTag to metadata">
+		<script>
+			<![CDATA[
+			import com.levelsbeyond.aws.S3Provider
+			import com.routeto1.spring.ApplicationContextHolder
+			S3Provider s3Provider = ApplicationContextHolder.getApplicationContext().getBean(S3Provider.class)
+			String etag = s3Provider.getS3().getObjectMetadata(bucket, key).getETag()
+			return etag
+			]]>
+		</script>
+	</groovyStep>
+	
+	<saveDataObjectStep name="save eTag to metadata"
+		devStep="true"
+		dataObjectExpression="${assetMaster.metadata}"
+		nextStep="set placeholder context data" >
+		<property name="eTag">${eTag}</property>
+	</saveDataObjectStep>
+	
+	<!-- .......................... LOCAL use sha1 .......................... -->
+	<executeSubflowStep name="assign sha1"
+		targetWorkflowId="existingSha1AssignSubflow"
+		executionLabelExpression="Assigning unique identifier to ${assetMaster.name}"
+		subjectChangePath="${assetMaster}"
+		subflowTargetDataDef="asset"
+		nextStep="set placeholder context data" />
+	
+	<!-- PLACEHOLDER STEPS sha1 -->
+	<setContextData name="set placeholder context data"
+		devStep="true"
+		nextStep="create placeholder on first system">
+		<set targetDataDef="remoteRequestBodyJson">
+			{
+			"assetName": "${T(org.apache.commons.lang3.StringEscapeUtils).escapeJson(assetMaster.name)}",
+			"placeholderType": "${assetType}",
+			"jsonMetadata": {
+			"eTag": "${assetMaster.metadata.eTag ?: null}",
+			"sha1": "${assetMaster.metadata.sha1 ?: null}"
+			}
+			}
+		</set>
+	</setContextData>
+	
+	<!-- Create Placeholder Asset on FIRST System -->
+	<executeSubflowStep name="create placeholder on first system"
+		targetWorkflowId="runRemoteWorkflowAndMonitor"
+		subjectChangePath="${remoteReachEngineAddress1}"
+		resultDataDef="ingestWFStatus1"
+		subflowTargetDataDef="remoteReachEngineAddress"
+		executionLabelExpression="Create placeholder asset on ${destinationServer1}"
+		nextStep="check for file transfer service">
+		<subflowContextDataMapping parentDataDef="remotePlaceholderWorkflowId"      subflowDataDef="remoteWorkflowId"/>
+		<subflowContextDataMapping parentDataDef="siblingReachUser"                 subflowDataDef="remoteUser"/>
+		<subflowContextDataMapping parentDataDef="siblingReachPw"                   subflowDataDef="remoteUserPassword"/>
+		<subflowContextDataMapping parentDataDef="remoteRequestBodyJson"            subflowDataDef="workflowRequestBody"/>
+	</executeSubflowStep>
+	
+	
+	<!-- Check to see if Signiant is configured for use on clients system, if not upload to aws bucket -->
+	<noopStep name="check for file transfer service"
+		executionLabelExpression="Checking if Signiant configured" >
+		<transition condition="${signiantConfigured}">
+			<targetStepName>send source file to destination one using Signiant</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>send source file to aws bucket</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<!-- ................................. SEND USING SIGNIANT ................................ -->
+	<!-- send to FIRST system using Signiant -->
+	<executeSubflowStep name="send source file to destination one using Signiant"
+		targetWorkflowId="signiantManagerRequest"
+		executionLabelExpression="Sending Source file via Signiant to ${destinationServer1}"
+		subjectChangePath="${assetMaster}"
+		waitForCompletionExpression="true"
+		resultDataDef="signiantResponse1"
+		nextStep="set string">
+		<subflowContextDataMapping parentDataDef="destinationServer1" subflowDataDef="destinationServer" />
+	</executeSubflowStep>
+	
+	
+	<!-- ................................. SEND USING AWS Bucket ................................ -->
+	<copyFileStep name="send source file to aws bucket"
+		sourceFileExpression="${assetMaster.proxy.file.absolutePath}"
+		targetDirectoryExpression="${awsTransferBucket}"
+		targetFilenameExpression="${assetMaster.proxy.file.name}"
+		nextStep="set string">
+	</copyFileStep>
+	
+	<!-- REPLACE PLACEHOLDER -->
+	<!-- Set remote context data for placeholder asset on other system -->
+	<setContextData name="set string"
+		nextStep="set context data for remote replace workflow on siblings"
+		targetDataDef="stringXml"
+		valueExpression="${T(org.apache.commons.lang3.StringEscapeUtils).escapeXml(content?.metadataSource?.metadataSource)}" >
+		<set targetDataDef="targetFilePath">/reachengine/temp/${assetMaster.proxy.file.name}</set>
+		<set targetDataDef="ogFilePath">${awsTransferBucket}${assetMaster.proxy.file.name}</set>
+		<set targetDataDef="assetName">${assetMaster.proxy.file.name}</set>
+	</setContextData>
+	
+	<groovyStep name="set context data for remote replace workflow on siblings"
+		executionLabelExpression="Setting values to be sent to asset on sister system"
+		resultDataDef="remoteReplaceBodyJson1"
+		nextStep="kick off placeholder replacement on first system">
+		<script>
+			<![CDATA[
+			import groovy.json.JsonOutput
+			import java.lang.Integer
+			import java.lang.Exception
+			import java.text.SimpleDateFormat
+			import org.slf4j.Logger
+			import org.slf4j.LoggerFactory
+			
+			def submitMap = [
+				"mediaInfoXml": stringXml,
+				"assetName": assetName,
+				"sha1": sha1,
+				"eTag": eTag,
+				"ogFilePath": ogFilePath,
+				"targetFilePath": targetFilePath,
+				"signiantConfigured": signiantConfigured
+			]
+			
+			return JsonOutput.toJson(submitMap)
+			]]>
+		</script>
+	</groovyStep>
+	
+	
+	<!-- KICK OFF ACTUAL INGEST WORKFLOWS ON FIRST SYSTEMS -->
+	<executeSubflowStep name="kick off placeholder replacement on first system"
+		targetWorkflowId="runRemoteWorkflowAndMonitor"
+		subjectChangePath="${remoteReachEngineAddress1}"
+		resultDataDef="assetReplaceStatus1"
+		subflowTargetDataDef="remoteReachEngineAddress"
+		executionLabelExpression="Replacing placeholder asset on ${destinationServer1}"
+		nextStep="end">
+		<subflowContextDataMapping parentDataDef="remoteReplaceWorkflowId"          subflowDataDef="remoteWorkflowId"/>
+		<subflowContextDataMapping parentDataDef="siblingReachUser"                       subflowDataDef="remoteUser"/>
+		<subflowContextDataMapping parentDataDef="siblingReachPw"               subflowDataDef="remoteUserPassword"/>
+		<subflowContextDataMapping parentDataDef="remoteReplaceBodyJson1"            subflowDataDef="workflowRequestBody"/>
+	</executeSubflowStep>
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"    pctComplete="100"/>
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing on the directory"
+		reasonExpression="Workflow already executing on the directory"
+	/>
+	
+	<failWorkflowStep name="sibling workflow error"
+		reasonExpression="sibling workflow error"
+		executionLabelExpression="sibling workflow error"
+	/>
+	
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- ....... User Input Variables ........ -->
+	<contextDataDef name="fileToIngest" 		    dataType="File"	        userInput="true"    label="File To Ingest"      required="true" displayIndex="1" />
+	<contextDataDef name="collections"              dataType="Data Object"  userInput="true"    label="Collections"          multiple="true" displayIndex="2" >
+		<picklist>
+			<dataObjectSearch dataObjectClass="AssetCollection">
+				<searchPath>name</searchPath>
+			</dataObjectSearch>
+		</picklist>
+	</contextDataDef>
+	<contextDataDef name="categories"               dataType="Data Object"  userInput="true" multiple="true" >
+		<picklist>
+			<dataObjectSearch dataObjectClass="AssetCategory">
+				<searchPath>name</searchPath>
+			</dataObjectSearch>
+		</picklist>
+	</contextDataDef>
+	
+	<!-- ....... Dynamic Properties ........ -->
+	<contextDataDef name="destinationServer1"        dataType="String"      defaultDataExpression="${#sysconfig('marketplace.ingestPair.siblingServer1')}" />
+	<contextDataDef name="remoteReachEngineAddress1" dataType="String"      defaultDataExpression="${#sysconfig('marketplace.ingestPair.siblingAddress1')}" />
+	<contextDataDef name="signiantConfigured"        dataType="Boolean"     defaultDataExpression="${#sysconfig('marketplace.ingestPair.signiantConfigured') ?: false}" />
+	<contextDataDef name="awsTransferBucket"         dataType="String"      defaultDataExpression="${#sysconfig('marketplace.ingestPair.awsTransferBucket')}" />
+	<contextDataDef name="siblingReachUser"          dataType="String"      hidden="true"  defaultDataExpression="${#sysconfig('marketplace.ingestPair.siblingUsername1')}"/>
+	<contextDataDef name="siblingReachPw"            dataType="String"      hidden="true"  defaultDataExpression="${#sysconfig('marketplace.ingestPair.siblingPassword1')}"/>
+	<contextDataDef name="ingestSubflow"      	     dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.ingestPair.ingestSubflow') ?: '_anyAssetIngest'}"/>
+	
+	<!-- ....... Processing Variables ........ -->
+	<contextDataDef name="currentExecutions" 	    dataType="Data Object" 	multiple="true"/>
+	<contextDataDef name="remoteRequestBodyJson"    dataType="JSON"         />
+	<contextDataDef name="remoteReplaceBodyJson1"   dataType="JSON"         />
+	<contextDataDef name="ingestWFStatus1"          dataType="String"       />
+	<contextDataDef name="assetReplaceStatus1"      dataType="String"       />
+	<contextDataDef name="signiantResponse1"        dataType="JSON"         />
+	<contextDataDef name="assetMaster" 			    dataType="Data Object"  />
+	<contextDataDef name="content"                  dataType="Data Object"  defaultDataExpression="${#sourceContent(assetMaster)}"/>
+	<contextDataDef name="assetType"                dataType="String"       defaultDataExpression="${assetMaster.assetType.toLowerCase()}" />
+	<contextDataDef name="sha1"                     dataType="String"       />
+	<contextDataDef name="eTag"                     dataType="String"       />
+	<contextDataDef name="sha1Check"                dataType="String"       />
+	<contextDataDef name="bucket"                   dataType="String"       defaultDataExpression="${fileToIngest.toString().split(':')[1]}" />
+	<contextDataDef name="key"                      dataType="String"       defaultDataExpression="${fileToIngest.toString().split(':')[2]}" />
+	
+	<!-- ......  Remote Workflow Variables ....... -->
+	<contextDataDef name="startOrRun" 				dataType="String"		defaultDataExpression="start" />
+	<contextDataDef name="asyncProxiesFlag"         dataType="Boolean"      defaultDataExpression="false" />
+	<contextDataDef name="targetFilePath"           dataType="String"       />
+	<contextDataDef name="ogFilePath"               dataType="String"       />
+	<contextDataDef name="assetName"                dataType="String"       />
+	<contextDataDef name="content"                  dataType="Data Object"  defaultDataExpression="${#sourceContent(assetMaster)}"/>
+	<contextDataDef name="contentMetadata"          dataType="String"       />
+	<contextDataDef name="stringXml"                dataType="String"       />
+	<contextDataDef name="remotePlaceholderWorkflowId"  dataType="String"   defaultDataExpression="createPlaceholder"/>
+	<contextDataDef name="remoteReplaceWorkflowId"      dataType="String"   defaultDataExpression="queryAssetAndReplace" />
+</workflow>

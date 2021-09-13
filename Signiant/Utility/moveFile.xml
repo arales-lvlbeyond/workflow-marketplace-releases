@@ -1,0 +1,81 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xsi:schemaLocation="
+		http://levelsbeyond.com/schema/latest
+		https://s3-us-west-2.amazonaws.com/schema.levelsbeyond.com/2.3.16.17962/studio.xsd
+	"
+	id="moveFile"
+	name="Move File"
+	executionLabelExpression="Moving ${source} to ${destinationPath}"
+	subjectDOClassName=""
+	showInUserInterface="false"
+	sdkVersion="">
+
+	<initialStepName>check if target directory exists</initialStepName>
+	
+	<noopStep name="check if target directory exists" >
+		<transition condition="${!destinationDirectory.exists()}">
+			<targetStepName>os make target directory</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>os move</targetStepName>
+		</transition>
+	</noopStep>
+		
+	
+    <runCommandStep name="os make target directory"
+	    executionLabelExpression="Creating directory: ${destinationPath}"
+	    nextStep="os move"
+	    executablePathExpression="${mvExePath}"
+	    executableNameExpression="os move"
+    >
+        <arg>-p</arg>
+        <arg>${#filepath(destinationPath)}</arg>
+    </runCommandStep>
+
+    <runCommandStep name="os move"
+	    executionLabelExpression="Moving ${source} to ${destinationPath}"
+	    executablePathExpression="/bin/mv"
+	    resultCodeDataDef=""
+	    nextStep="end"
+    >
+            <arg>${overwriteIfExists ? '-f' : '-n'}</arg>
+            <arg>${source.endsWith('/') ? source.substring(0, source.lastIndexOf('/')) : source}</arg>
+            <arg>${destinationPath}</arg>
+    </runCommandStep>
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end" />
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- Input -->
+	<contextDataDef name="source"                           dataType="String" />
+    <contextDataDef name="destinationPath"                  dataType="String" />
+    <contextDataDef name="overwriteIfExists"                dataType="Boolean"      defaultDataExpression="false" />
+	
+	<!-- Processing -->
+	<contextDataDef name="movedFile"                        dataType="String" />
+	<contextDataDef name="isDirectory"                      dataType="Boolean"      defaultDataExpression="${source.endsWith('/') ? true : false}" />
+	<contextDataDef name="destinationDirectory"             dataType="Directory"    defaultDataExpression="${ destinationPath.endsWith('/') ? destinationPath : destinationPath.substring( 0, destinationPath.lastIndexOf('/') ) }" />
+	
+	<!-- Internal -->
+	<contextDataDef name="mvExePath"                        dataType="String"       defaultDataExpression="/bin/mkdir" />
+
+ 
+ 
+</workflow>

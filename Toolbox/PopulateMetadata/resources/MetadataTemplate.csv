@@ -1,0 +1,13 @@
+name,displayName,description,showInInspector,type,multiple,picklistItems
+testStringField1,testStringField1,,TRUE,string,,
+testNumberField1,testNumberField1,,TRUE,double,,
+testBooleanField1,testBooleanField1,,TRUE,boolean,,
+testSinglePicklistField,testSinglePicklistField,,TRUE,lookup,,"item 1,item 2, item 3, item 4"
+testMultiplePicklistField,testMultiplePicklistField,,TRUE,lookup,TRUE,"item 1,item 2, item 3, item 4"
+anotherPicklist,anotherPicklist,,TRUE,lookup,TRUE,
+testDateField,testDateField,,TRUE,date,,
+specialCharactersPicklist,specialCharactersPicklist,specialCharactersPicklist,TRUE,lookup,,"!,@,#,$,%,^,&,*,(,),-,_,+,=,{,},|,:,;,"",',<,>,?,/,~"
+testBooleanField2,testBooleanField2,,TRUE,boolean,,
+testBooleanField3,testBooleanField3,,TRUE,boolean,,
+testLargeStringField1,testLargeStringField1,,TRUE,text,,
+testLinkField1,testLinkField1,,TRUE,link,,

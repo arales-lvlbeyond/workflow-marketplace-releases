@@ -1,0 +1,157 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+	id="deliverVideoToMedway"
+	name="Deliver Video to Interplay"
+	executionLabelExpression="Deliver Video to Interplay: ${subject.name}"
+	description=""
+	showInUserInterface="true"
+	subjectDOClassName="VideoAssetMaster"
+	sdkVersion=""
+>
+	
+	<initialStepName>set XML name</initialStepName>
+	
+
+	<setContextData
+		name="set XML name"
+		executionLabelExpression="Package name is ${xmlName}"
+		valueExpression="${subject.name}_${uniqueID}"
+		targetDataDef="xmlName"
+		nextStep="set temp medway XML file"
+	/>
+	
+	<setContextData
+		name="set temp medway XML file"
+		targetDataDef="tempMedwayXML"
+		valueExpression="/reachengine/media/XMLTests/${xmlName}.xml"
+		nextStep="create medway xml"
+	/>
+	
+	<!--	<setContextData
+			name="set clip metadata"
+			targetDataDef="videoTrackCount"
+			valueExpression="3"
+			nextStep="end"
+			/>-->
+	
+	<!--		valueExpression="${videoClip.assetMaster.originalContent.getMediaInfo().getVideoTracks().size()}"
+-->
+	
+	<groovyStep
+		name="create medway xml"
+		executionLabelExpression="Creating Medway XML from Clip"
+		resultDataDef="groovyReturn"
+		nextStep="validate xml"
+	>
+		<script>
+        <![CDATA[
+			import groovy.xml.MarkupBuilder
+			import groovy.xml.StreamingMarkupBuilder
+			import groovy.xml.XmlUtil
+			import java.text.SimpleDateFormat
+			import java.util.Date
+			
+			medwayFrameRate = ""
+			
+			if (clipDropFrame == false) {
+				if (clipFrameRate == 50) {
+					medwayFrameRate = "50"
+				}
+				if (clipFrameRate == 60.0) {
+					medwayFrameRate = "60NDF"
+				}
+				if (clipFrameRate == 24.0 || (clipFrameRate > 23.9 && clipFrameRate <= 24.1)) {
+					medwayFrameRate = "24NDF"
+				}
+				else {
+					medwayFrameRate = "NDF"
+				}
+			} else {
+				if (clipFrameRate == 59.94) {
+					medwayFrameRate = "60DF"
+				}
+				if (clipFrameRate == 24.0 || (clipFrameRate > 23.9 && clipFrameRate <= 24.1)) {
+					medwayFrameRate = "24DF"
+				}
+				else {
+					medwayFrameRate = "DF"
+				}
+			}
+			
+			new File(tempMedwayXML.absolutePath).withWriter { writer ->
+				def xml = new MarkupBuilder(writer)
+				xml.setDoubleQuotes(true)
+				
+				xml.mkp.xmlDeclaration(version: "1.0", encoding: "UTF-8")
+				xml.MarquisEDL('version': '2.0')
+					{
+						FrameRate(medwayFrameRate)
+						ClipList
+							{
+								Clip(usewholeclip: 'true')
+									{
+										UID(uniqueID)
+										Title(videoName)
+										File(parentAsset.replace('/', '\\'))
+										CustomMetadata
+											{
+												CustomData(name: 'Reach2Avid', 'Hello from Levels Beyond! Reach Name: ' + videoName)
+											}
+										Start(startTimecode)
+										End(endTimecode)
+										NumberVideoTracks(videoTrackCount)
+										NumberAudioTracks(audioTrackCount)
+									}
+							}
+					}
+			}
+			
+			return true
+			]]>
+        </script>
+	</groovyStep>
+	
+	<validateXmlStep
+		name="validate xml"
+		xmlExpression="${tempMedwayXML}"
+		nextStep="copy xml to medway dir"
+	/>
+	
+	<!--Move XML to Shared Medway Repo-->
+	<copyFileStep
+		name="copy xml to medway dir"
+		sourceFileExpression="${tempMedwayXML}"
+		targetDirectoryExpression="${medwayBaseDir}"
+		nextStep="end"
+	/>
+	
+	<!--END-->
+	<noopStep name="end"/>
+	
+	<!--Context Data-->
+	<contextDataDef name="targetOS" 			        dataType="String"       defaultDataExpression="windows"/>
+	<contextDataDef name="videoName"                    dataType="String"       defaultDataExpression="${subject.name}"/>
+	<contextDataDef name="startTimecode"                dataType="String"       defaultDataExpression="${subject.startTimecode}"/>
+	<contextDataDef name="endTimecode"                  dataType="String"       defaultDataExpression="${subject.endTimecode}"/>
+	<contextDataDef name="parentAsset"                  dataType="String"       defaultDataExpression="${#mapPath(subject.originalContent.file.absolutePath, targetOS)}"/>
+	<contextDataDef name="uniqueID"                     dataType="String"       defaultDataExpression="${#uuid().toString()}"/>
+	<contextDataDef name="xmlName" 					    dataType="String"/>
+	<contextDataDef name="tempMedwayXML"                dataType="File"/>
+	<contextDataDef name="medwayBaseDir"                dataType="String"       defaultDataExpression="${#sysconfig('workflow.deliveryLocation.medway')}" label="This should end in a trailing '/' "/>
+	<contextDataDef name="groovyReturn"                 dataType="Boolean"/>
+	<contextDataDef name="clipFrameRate"                dataType="Double"       defaultDataExpression="${subject.originalContent.frameRate}"/>
+	<contextDataDef name="clipDropFrame"                dataType="Boolean"      defaultDataExpression="${subject.originalContent.dropFrameFlag}"/>
+	
+	
+	<contextDataDef name="videoTrackCount"              dataType="String"       defaultDataExpression="1"/>
+	<contextDataDef name="audioTrackCount"              dataType="String"       defaultDataExpression="2"/>
+	
+	
+	<!--XML Metadata-->
+	<contextDataDef name="episodeDescription"           dataType="String"/>
+	<contextDataDef name="showDescription"              dataType="String"/>
+	<contextDataDef name="releaseDate"           		dataType="Date"/>
+	
+</workflow>

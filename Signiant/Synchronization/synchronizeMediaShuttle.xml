@@ -1,0 +1,148 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+          id="synchronizeMediaShuttle"
+          name="Synchronize MediaShuttle"
+          executionLabelExpression="Synchronizing MediaShuttle with Reach Engine..."
+          subjectDOClassName=""
+          sdkVersion=""
+          devWorkflow="true"
+          adminOnly="true"
+          showInUserInterface="true"
+>
+    
+    <initialStepName>check if workflow is already executing</initialStepName>
+    
+    <queryStep
+        name="check if workflow is already executing"
+        pctComplete="5"
+        targetDataObjectClass="WorkflowExecution"
+        resultDataDef="currentExecutions">
+        <transition condition="${currentExecutions.size() == 0}">
+            <targetStepName>get portal id</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>workflow already executing</targetStepName>
+        </transition>
+    
+        <criteria>
+            <![CDATA[
+				<criteria>
+					<and>
+						<condition property="workflowVersion.workflow.key" op="eq">
+							<test value="${ #this.workflow.workflowVersion.workflow.key }" />
+						</condition>
+						<condition property="uuid" op="noteq">
+							<test value="${ #this.workflow.uuid }" />
+						</condition>
+						<condition property="status" op="in">
+							<tests>
+								<test value="CREATED" />
+								<test value="QUEUED" />
+								<test value="EXECUTING" />
+							</tests>
+						</condition>
+					</and>
+				</criteria>
+			]]>
+        </criteria>
+    </queryStep>
+    
+   <executeSubflowStep name="get portal id"
+       targetWorkflowId="getMediaShuttlePortal"
+       executionLabelExpression="Get Media Shuttle portal"
+       resultDataDef="portalId"
+   >
+        <transition condition="${portalId != null}">
+            <targetStepName>get repo</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>failed to retrieve portal id</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="mediaShuttleApiKey" subflowDataDef="mediaShuttleApiKey"/>
+        <subflowContextDataMapping parentDataDef="baseMediaShuttlePortalsUrl" subflowDataDef="baseMediaShuttlePortalsUrl"/>
+    </executeSubflowStep>
+    
+    <executeSubflowStep name="get repo"
+                        devStep="true"
+                        executionLabelExpression="Getting repo path..."
+                        targetWorkflowId="getMediaShuttleRepo"
+                        resultDataDef="repoPath">
+        <transition condition="${repoPath != null}">
+            <targetStepName>set upload and ingested paths</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>error getting repo</targetStepName>
+        </transition>
+        
+        <subflowContextDataMapping parentDataDef="portalId"             subflowDataDef="portalId" />
+    </executeSubflowStep>
+    
+    <setContextData name="set upload and ingested paths"
+                    devStep="true"
+                    executionLabelExpression="Setting upload and ingested paths..."
+                    nextStep="synchronize uploaded packages"
+    >
+        <set targetDataDef="uploadsPath" valueExpression="${ #mapPath( #joinPath( #mapPathReverse(repoPath, 's3mapping'), uploadsAddress ?: ''), 's3Mapping')  }" />
+        <set targetDataDef="previouslyIngestedPath" valueExpression="${ #mapPath( #joinPath( #mapPathReverse(repoPath, 's3mapping'), ingestedAddress ?: ''), 's3mapping')  }" />
+    </setContextData>
+    
+    <executeSubflowStep name="synchronize uploaded packages"
+                        targetWorkflowId="${synchronizeUploadedSubflowId}"
+                        executionLabelExpression="Synchronizing uploaded packages..."
+                        waitForCompletionExpression="false"
+                        nextStep="end">
+        <subflowContextDataMapping parentDataDef="uploadsPath"              subflowDataDef="uploadsPath"/>
+        <subflowContextDataMapping parentDataDef="repoPath"                 subflowDataDef="repoPath"/>
+        <subflowContextDataMapping parentDataDef="previouslyIngestedPath"   subflowDataDef="previouslyIngestedPath"/>
+        <subflowContextDataMapping parentDataDef="portalId"                 subflowDataDef="portalId" />
+    </executeSubflowStep>
+    
+    <!-- ................................................... End Steps .................................................... -->
+    <noopStep name="workflow already executing"
+              executionLabelExpression="Workflow is already executing."
+    />
+    
+    <failWorkflowStep name="error getting repo"
+                      reasonExpression="error retrieving repo path!"
+    />
+    
+    <failWorkflowStep name="failed to retrieve portal id"
+        reasonExpression="Failed to retrieve portal ID from MediaShuttle."
+        executionLabelExpression="Failed to retrieve portal ID from MediaShuttle"
+    />
+    <!-- success -->
+    <noopStep name="end"/>
+    
+    <!-- ................................................... Data Defs .................................................... -->
+    <contextDataDef name="currentExecutions" 	        dataType="Data Object" 	multiple="true"/>
+    <contextDataDef name="repoPath"                     dataType="String" />
+    <contextDataDef name="uploadsAddress"               dataType="String"       defaultDataExpression="${#sysconfig('media.shuttle.import.path') ?: '' }" />
+    <contextDataDef name="ingestedAddress"              dataType="String"       defaultDataExpression="${#sysconfig('media.shuttle.ingested.path') ?: '' }" />
+    <contextDataDef name="uploadsPath"                  dataType="String" />
+    <contextDataDef name="previouslyIngestedPath"       dataType="String" />
+    <contextDataDef name="synchronizeIngestedSubflowId" dataType="String"       defaultDataExpression="synchronizeIngestedPackages" />
+    <contextDataDef name="synchronizeUploadedSubflowId" dataType="String"       defaultDataExpression="synchronizeUploadedPackages" />
+    <contextDataDef name="portalId"                     dataType="String" />
+    
+    <contextDataDef name="mediaShuttleApiKey"           dataType="String"       hidden="true"   defaultDataExpression="${#sysconfig('media.shuttle.api.key')}"/>
+    <contextDataDef name="baseMediaShuttlePortalsUrl"   dataType="String"       defaultDataExpression="${#sysconfig('media.shuttle.portal.url')}"/>
+</workflow>

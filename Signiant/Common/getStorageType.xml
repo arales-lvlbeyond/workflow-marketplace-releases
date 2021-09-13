@@ -1,0 +1,111 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		xmlns="http://levelsbeyond.com/schema/workflow"
+		xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+		xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://schema.levelsbeyond.com/latest/studio.xsd"
+		id="getStorageType"
+		name="Get Storage Type"
+		executionLabelExpression="Get Storage Type"
+		subjectDOClassName=""
+		showInUserInterface="false"
+		sdkVersion=""
+		hasDownload="false"
+		resultDataDef="storageType"
+>
+	
+	<initialStepName>get storage id</initialStepName>
+	
+	
+<!--	Get storage ID-->
+	<submitHttpStep name="get storage id"
+		executionLabelExpression="Get storage ID | Portal ID: ${portalId}"
+		urlExpression="${baseMediaShuttlePortalsUrl}/portals/${portalId}/storage"
+		requestMethodExpression="GET"
+		responseCodeDataDef="getStorageIdResponseCode"
+		responsePayloadDataDef="getStorageIdResponse"
+		>
+		<requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+		
+		<transition condition="${getStorageIdResponseCode.startsWith('2')}">
+			<targetStepName>set storage id</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to retrieve storage id</targetStepName>
+		</transition>
+	</submitHttpStep>
+	
+	<setContextData name="set storage id"
+		targetDataDef="storageId"
+		valueExpression="${getStorageIdResponse.get('storageId').asText()}"
+		nextStep="get storage type" />
+	
+
+<!--	Get storage type-->
+	<submitHttpStep name="get storage type"
+		executionLabelExpression="Get storage type | Storage ID: ${storageId}"
+		urlExpression="${baseMediaShuttlePortalsUrl}/storage/${storageId}"
+		requestMethodExpression="GET"
+		responseCodeDataDef="getStorageTypeResponseCode"
+		responsePayloadDataDef="getStorageTypeResponse"
+		>
+		<requestHeader name="Authorization">${mediaShuttleApiKey}</requestHeader>
+		
+		<transition condition="${getStorageTypeResponseCode.startsWith('2')}">
+			<targetStepName>set storage type</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>failed to retrieve storage type</targetStepName>
+		</transition>
+	</submitHttpStep>
+	
+	<setContextData name="set storage type"
+		targetDataDef="storageType"
+		valueExpression="${getStorageTypeResponse}"
+		nextStep="end" />
+	
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"/>
+	
+	<failWorkflowStep name="failed to retrieve storage id"
+		executionLabelExpression="Failed to retrieve storage ID | Code: ${getStorageIdResponseCode}"
+		reasonExpression="Response: ${getStorageIdResponse.asText()}" />
+	
+	<failWorkflowStep name="failed to retrieve storage type"
+			executionLabelExpression="Failed to retrieve storage type | Code: ${getStorageTypeResponseCode}"
+			reasonExpression="Response: ${getStorageTypeResponse.asText()}" />
+	
+	
+	<!-- ................................................... Data Defs .................................................... -->
+	<!-- ............ INPUT ............. -->
+	<contextDataDef dataType="String" name="portalId" />
+	<contextDataDef name="mediaShuttleApiKey" dataType="String" hidden="true" />
+	<contextDataDef name="baseMediaShuttlePortalsUrl" dataType="String"/>
+	
+	<!-- ......... PROCESSING ........... -->
+	<contextDataDef dataType="String" name="storageId" />
+	<contextDataDef dataType="JSON" name="storageType" />
+	
+	<contextDataDef dataType="String" name="getStorageIdResponseCode" />
+	<contextDataDef dataType="JSON" name="getStorageIdResponse" />
+	
+	<contextDataDef dataType="String" name="getStorageTypeResponseCode" />
+	<contextDataDef dataType="JSON" name="getStorageTypeResponse" />
+
+</workflow>

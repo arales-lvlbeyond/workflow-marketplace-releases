@@ -1,0 +1,162 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="pullFromFrameIO"
+          name="Pull Assets from Frame.IO"
+          executionLabelExpression="Pulling files from Frame.io Root Asset ID: ${rootAssetID}"
+          description="This workflow will pull Assets from the specified rootAssetId project in Frame.io
+           Once assets have been acquired from Frame.io they will be removed from the project."
+          adminOnly="true"
+          showInUserInterface="false"
+          group="Frame.io"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion=""
+          >
+
+    <initialStepName>check if this workflow is processing</initialStepName>
+
+    <!-- make sure this workflow is not already executing -->
+    <queryStep name="check if this workflow is processing"
+        targetDataObjectClass="WorkflowExecution"
+        resultDataDef="currentExecutions"
+        executionLabelExpression="Is a workflow running on this file already? ${currentExecutions.size() != 0}"
+        >
+        <transition condition="${currentExecutions.size() == 0}">
+            <targetStepName>get project children assets</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>workflow already executing</targetStepName>
+        </transition>
+        
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="like">
+                            <test value="%${rootAssetID}%" />
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+    
+    <submitHttpStep name="get project children assets"
+                    urlExpression="${fetchURL}"
+                    requestMethodExpression="GET"
+                    responseCodeDataDef="frameioResponseCodePullChildren"
+                    responsePayloadDataDef="frameioResponseJSONPullChildren"
+                    responseHeadersDataDef="responseHeaders"
+        >
+        <transition condition="${frameioResponseJSONPullChildren.isNull()}">
+            <targetStepName>no assets to pull</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>process frame io assets</targetStepName>
+        </transition>
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <executeSubflowStep name="process frame io assets"
+                        targetWorkflowId="processFrameioAsset"
+                        subjectChangePath="${frameioResponseJSONPullChildren}"
+                        subflowTargetDataDef="assetJSON"
+                        nextStep="check pagination"/>
+
+    <noopStep name="check pagination"
+              devStep="true">
+        <transition condition="${#nameValuePair( responseHeaders, 'link') != null}">
+            <targetStepName>parse link header</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+
+    <setContextData name="parse link header"
+                    targetDataDef="nextLinks"
+                    valueExpression="${#nameValuePair( responseHeaders, 'link').value}">
+        <transition condition="${nextLinks != null}">
+            <targetStepName>get next link</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </setContextData>
+
+    <setContextData name="get next link"
+                    targetDataDef="nextLinks"
+                    valueExpression="${nextLinks.?[#this.contains('next')]}">
+        <transition condition="${nextLinks.size() > 0}">
+            <targetStepName>parse next link</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </setContextData>
+
+    <setContextData name="parse next link"
+                    targetDataDef="fetchURL"
+                    valueExpression="${nextLinks[0].substring(nextLinks[0].indexOf('&lt;')+1, nextLinks[0].indexOf('&gt;'))}"
+                    nextStep="get project children assets"/>
+
+    <!-- End Steps -->
+    <noopStep name="workflow already executing"/>
+    
+    <noopStep name="no assets to pull"
+              executionLabelExpression="There are no new assets to ingest."
+    />
+    
+    <noopStep name="end"/>
+
+    <!-- Internal -->
+    <contextDataDef name="currentExecutions"                    dataType="Data Object" 	multiple="true"/>
+    <contextDataDef name="frameioURL"                           dataType="String"       defaultDataExpression="https://api.frame.io"/>
+    <contextDataDef name="frameBearer"                          dataType="String"       hidden="true"   defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"/>
+    <contextDataDef name="rootAssetID"                          dataType="String"       defaultDataExpression="${#sysconfig('workflows.pullFromFrameIO.rootAssetId')}" />
+    <contextDataDef name="fetchURL"                             dataType="String"       defaultDataExpression="${frameioURL}/v2/assets/${rootAssetID}/children?page_size=${pageSize}"/>
+    <contextDataDef name="pageSize"                             dataType="String"       defaultDataExpression="${#sysconfig('workflows.frameio.pagesize') ?: '20'}"/>
+    <contextDataDef name="nextLinks"                            dataType="String"       multiple="true"/>
+    
+    <contextDataDef name="frameioOriginalUrls"                  dataType="String"       multiple="true" />
+    
+    <!-- Responses -->
+    <contextDataDef name="frameioResponseCode"                  dataType="Integer"/>
+    <contextDataDef name="frameioResponseCodePullChildren"      dataType="Integer"/>
+    <contextDataDef name="frameioResponseJSONPullChildren"      dataType="JSON"         multiple="true"/>
+    <contextDataDef name="responseHeaders"                      dataType="NameValuePair" multiple="true"/>
+</workflow>

@@ -1,0 +1,191 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xsi:schemaLocation="http://schema.levelsbeyond.com.s3.amazonaws.com/latest/studio.xsd"
+          id="mpRevSynchronizeCaptionOrder"
+          name="Check Rev.com for Completed Caption Order"
+          executionLabelExpression="Checking caption order for ${subject.name} via Rev.com - Order #: ${asset.metadata.mpRevOrderNumber}"
+          subjectDOClassName="AssetMaster"
+          showInUserInterface="true"
+          subjectQualifierExpression="${metadata.mpRevOrderStatus.equals(#picklistValue('mpRevOrderStatus', 'Order Placed - Pending') )}"
+          group="REV"
+          sdkVersion=""
+>
+
+    <initialStepName>check if workflow is running</initialStepName>
+
+
+    <queryStep name="check if workflow is running"
+               executionLabelExpression="Is a workflow running on asset - ${asset.name} already? ${currentExecutions.size() != 0}"
+               targetDataObjectClass="WorkflowExecution"
+               resultDataDef="currentExecutions"
+               pctComplete="5"
+    >
+        <transition condition="${currentExecutions.size() == 0}">
+            <targetStepName>query caption order</targetStepName>
+        </transition>
+        <transition condition="true">
+            <targetStepName>workflow is running</targetStepName>
+        </transition>
+
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="like">
+							<test value="%${asset.name}%" />
+						</condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+
+    <runCommandStep
+            name="query caption order"
+            executionLabelExpression="Querying caption order for ${asset.name}"
+            executablePathExpression="${curlExecutablePath}"
+            stdoutDataDef="orderResult"
+            stderrDataDef="orderError"
+    >
+        <transition condition="${orderResult != null AND orderResult?.get('status').asText().equals('Complete')}">
+            <targetStepName>get caption url</targetStepName>
+        </transition>
+        <transition condition="${orderResult != null AND orderResult?.get('status') != null}">
+            <targetStepName>caption order is not yet complete</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>query transcript order failure</targetStepName>
+        </transition>
+        <arg>-X</arg>
+        <arg>GET</arg>
+        <arg>${revUrl}/api/v1/orders/${asset.metadata.mpRevOrderNumber}</arg>
+        <arg>-H</arg>
+        <arg>Authorization: Rev ${clientApiKey}:${userApiKey}</arg>
+    </runCommandStep>
+
+    <setContextData name="get caption url"
+                    executionLabelExpression="Retrieve caption files from rev.com"
+                    targetDataDef="captionUrl"
+                    valueExpression="${orderResult?.get('attachments').?[get('kind').asText().equals('caption')][0].get('links')?.get(0)?.get('href').asText()}"
+                    nextStep="get caption formats"
+                    devStep="true"
+    />
+
+    <setContextData name="get caption formats"
+                    executionLabelExpression="Get the caption formats submitted with order"
+                    targetDataDef="captionFormats"
+                    valueExpression="${#picklistLabels('mpRevCaptionFormats', asset.metadata.mpRevCaptionFormats, '|').toLowerCase()}"
+                    nextStep="build caption urls for each format"
+                    devStep="true"
+    />
+
+    <groovyStep name="build caption urls for each format"
+                executionLabelExpression="Build caption urls for each format"
+                resultDataDef="captionUrls"
+                nextStep="ingest caption orders"
+                devStep="true"
+    >
+        <script>
+            <![CDATA[
+			list = []
+
+			captionFormats.each { format ->
+				if (format.equals('subrip'))
+					format = 'srt'
+
+				list.add(captionUrl + '.' + format)
+			}
+
+			return list
+			]]>
+        </script>
+    </groovyStep>
+
+    <executeSubflowStep name="ingest caption orders"
+                        executionLabelExpression="Ingesting ${captionUrls.size()} caption files"
+                        targetWorkflowId="${subflowId}"
+                        subjectChangePath="${captionUrls}"
+                        subflowTargetDataDef="captionFileUrl"
+                        nextStep="set parent asset captions order status to complete"
+    >
+        <subflowContextDataMapping parentDataDef="asset"        subflowDataDef="asset" />
+    </executeSubflowStep>
+
+    <saveDataObjectStep name="set parent asset captions order status to complete"
+                        executionLabelExpression="Updating metadata for ${asset.name}.  Order Synchronize Complete."
+                        dataObjectExpression="${asset.metadata}"
+                        nextStep="end"
+    >
+        <property name="mpRevOrderStatus">${#picklistValue('mpRevOrderStatus', 'Order Complete')}</property>
+    </saveDataObjectStep>
+
+    <!-- ...................................................... End Steps ...................................................... -->
+    <!-- success -->
+    <noopStep name="caption order is not yet complete"
+              executionLabelExpression="Caption order is not yet complete for ${asset.name}"
+    />
+
+    <noopStep name="end" />
+
+    <!-- fail -->
+    <failWorkflowStep name="workflow is running"
+                      executionLabelExpression="Workflow already executing on the asset ${asset.name}"
+                      reasonExpression="Workflow already executing on asset"
+    />
+
+    <failWorkflowStep name="query transcript order failure"
+                      reasonExpression="Error querying existing transcript order. Check status for details."
+    />
+
+    <!-- .................................................. Context Data Defs .................................................. -->
+    <!-- .......... Input variables .......... -->
+    <contextDataDef name="asset" 				dataType="Data Object"  defaultDataExpression="${subject}" />
+
+    <!-- .......... Processing variables .......... -->
+    <contextDataDef name="orderError" 			dataType="String"/>
+    <contextDataDef name="orderResult" 			dataType="JSON" />
+    <contextDataDef name="captionUrl"           dataType="String" />
+
+    <contextDataDef name="captionUrls"          dataType="String"       multiple="true" />
+    <contextDataDef name="captionFormats"       dataType="String"       multiple="true" />
+    <contextDataDef name="subflowId" 			dataType="String" 		defaultDataExpression="mpRevIngestOrderCaptionFile" />
+    <contextDataDef name="currentExecutions" 	dataType="Data Object" 	multiple="true"/>
+
+    <!-- Dynamic Properties -->
+    <contextDataDef name="revUrl"               dataType="String"       defaultDataExpression="${#sysconfig('marketplace.rev.revUrl') ?: 'https://api-sandbox.rev.com'}" />
+    <contextDataDef name="clientApiKey" 		dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.clientApiKey')}"/>
+    <contextDataDef name="userApiKey" 			dataType="String" 		defaultDataExpression="${#sysconfig('marketplace.rev.userApiKey')}"/>
+    <contextDataDef name="curlExecutablePath"	dataType="String" 		defaultDataExpression="${#sysconfig('system.curlExecutablePath')  ?: '/usr/bin/curl'}" />
+    
+    <!-- .......... Output variables .......... -->
+</workflow>

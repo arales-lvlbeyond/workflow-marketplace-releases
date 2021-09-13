@@ -1,0 +1,87 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="postToSlack"
+          name="Post To Slack"
+          executionLabelExpression="Posting Message to Slack | ${subject.name}"
+          description=""
+          subjectDOClassName="AssetMaster"
+          showInUserInterface="true"
+          resultDataDef=""
+          sdkVersion="">
+    
+    <initialStepName>Check Slack Input</initialStepName>
+	
+
+    <!--    Verify input-->
+    <noopStep name="Check Slack Input">
+        <transition condition="${slackChannel != null AND asset != null}">
+            <targetStepName>Update Slack Message</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <!--    Format Slack post-->
+    <setContextData name="Update Slack Message"
+        nextStep="post to slack"
+    >
+        <set targetDataDef="message" valueExpression="${asset.name} shared by ${currentUser} | Link: ${messageUrl} | Comment: ${reviewReason}"/>
+    </setContextData>
+    
+    <!--    POST request to Slack-->
+	<runCommandStep name="post to slack"
+			executablePathExpression="/usr/bin/curl"
+			stdoutDataDef="responseMessage"
+			resultCodeDataDef="responseCode"
+	>
+		<arg>-X</arg>
+		<arg>POST</arg>
+		<arg>${slackChannelURL}</arg>
+		<arg>-H</arg>
+		<arg>Content-Type: application/json</arg>
+		<arg>-d</arg>
+		<arg>
+			{
+				"text" : "${T(org.apache.commons.lang3.StringEscapeUtils).escapeJson(message)}"
+			}
+		</arg>
+		<transition condition="${responseMessage != 'ok'}">
+			<targetStepName>http error</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</runCommandStep>
+    
+    <!-- ................................................... End Steps .................................................... -->
+    <noopStep name="end"/>
+    
+    <failWorkflowStep name="http error" reasonExpression="Could not post to Slack. HTTP Error code ${responseCode}: ${responseMessage}." />
+    
+    <!-- ................................................... Data Defs .................................................... -->
+    <!-- ............ INPUT ............. -->
+    <contextDataDef name="slackChannel" label="1. Slack Channel:" dataType="String" userInput="true" required="true">
+        <picklist>
+            <metadataProperty>slackChannel</metadataProperty>
+        </picklist>
+    </contextDataDef>
+    <contextDataDef name="reviewReason" label="2. Comment:" dataType="String"   userInput="true" />
+    
+    <!--.............. PROCESSING .................-->
+    <contextDataDef name="asset" dataType="Data Object"     defaultDataExpression="${subject}" />
+    <contextDataDef name="mediaType" dataType="String" defaultDataExpression="${#mediaType(asset).toLowerCase() == 'other' ? 'timeline' : #mediaType(asset).toLowerCase()}" />
+    <contextDataDef name="reachUrl" dataType="String"          defaultDataExpression="${#sysconfig('reachengine.url')}"/>
+    <contextDataDef name="currentUser" dataType="String" defaultDataExpression="${#this.startedBy.firstName == null and #this.startedBy.lastName == null ? #this.startedBy.userName : (#this.startedBy.firstName == null ? '' : #this.startedBy.firstName + ' ') + (#this.startedBy.lastName == null ? '' : #this.startedBy.lastName) }" />
+
+    <!--.............. SLACK ......................-->
+    <contextDataDef name="messageUrl" dataType="String" defaultDataExpression="${reachUrl}/#/assets/${mediaType}/${asset.id}" />
+    <contextDataDef name="slackChannelURL" dataType="String" defaultDataExpression="${#sysconfig('slack.webhook.' + slackChannel)}" />
+    <contextDataDef name="message"          dataType="String"/>
+    <contextDataDef name="responseMessage"          dataType="String"/>
+    <contextDataDef name="responseCode" dataType="String" />
+
+    
+</workflow>

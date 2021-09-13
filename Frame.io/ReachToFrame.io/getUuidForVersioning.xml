@@ -1,0 +1,109 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2020 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  ~
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="getFrameUUIDForVersioning"
+          name="Get Frame UUID For Versioning"
+          executionLabelExpression="Frame UUID for versioning ${versionUUID}"
+          description=""
+          adminOnly="true"
+          showInUserInterface="false"
+          group="Frame.io"
+          resultDataDef="versionUUID"
+          subjectDOClassName=""
+          subjectQualifierExpression=""
+          sdkVersion=""
+          >
+
+    <!--
+    GET your target Asset via call to /v2/assets/:id​
+    Check the type that comes back.
+    If it's version_stack, the uuid you've just checked is your destination uuid. end.
+    Otherwise, grab the parent_id
+    GET the parent via the same endpoint, and check its type.
+    If the parent's type is version_stack, use its id as your destination.
+    If the type is anything else, you're dealing with a regular Asset and can use the original id as your destination.-->
+
+    <initialStepName>Get Details for Existing Asset</initialStepName>
+
+    <submitHttpStep name="Get Details for Existing Asset"
+                    urlExpression="${frameioURL}${frameId}"
+                    requestMethodExpression="GET"
+                    responseCodeDataDef="frameioResponseCode"
+                    responsePayloadDataDef="frameioResponseJson"
+                    nextStep="Check type">
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <noopStep name="Check type"
+        executionLabelExpression="Record Type: ${frameioResponseJson.type}">
+        <transition condition="${frameioResponseJson.type.equals('version_stack')}">
+            <targetStepName>end</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>Get Parent Details</targetStepName>
+        </transition>
+    </noopStep>
+
+    <submitHttpStep name="Get Parent Details"
+                    urlExpression="${frameioURL}${frameioResponseJson.parent_id}"
+                    requestMethodExpression="GET"
+                    responseCodeDataDef="frameioResponseCode"
+                    responsePayloadDataDef="frameioResponseJson"
+                    nextStep="Check Parent Type">
+        <requestHeader name="Content-Type">application/json</requestHeader>
+        <requestHeader name="Authorization">Bearer ${frameBearer}</requestHeader>
+    </submitHttpStep>
+
+    <noopStep name="Check Parent Type"
+        executionLabelExpression="Parent Record Type: ${frameioResponseJson.type}">
+        <transition condition="${frameioResponseJson.type.equals('version_stack')}">
+            <targetStepName>Set UUID</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+
+    <setContextData name="Set UUID"
+        targetDataDef="versionUUID"
+        valueExpression="${frameioResponseJson.id}"
+        nextStep="end"
+        />
+
+    <noopStep name="end"/>
+    <!--    CONTEXT DATA   -->
+    <!--  Input  -->
+    <contextDataDef name="frameId"                  dataType="String"/>
+
+    <!--  Processing  -->
+    <contextDataDef name="frameioURL"               dataType="String"       defaultDataExpression="https://api.frame.io/v2/assets/"/>
+    <contextDataDef name="frameBearer"              dataType="String"       defaultDataExpression="${#sysconfig('workflow.frameio.bearerToken')}"/>
+
+    <!-- Responses -->
+    <contextDataDef name="frameioResponseCode"      dataType="Integer"/>
+    <contextDataDef name="frameioResponseJson"      dataType="JSON"/>
+
+    <!--  Result  -->
+    <contextDataDef name="versionUUID"                  dataType="String"   defaultDataExpression="${frameId}"/>
+
+</workflow>

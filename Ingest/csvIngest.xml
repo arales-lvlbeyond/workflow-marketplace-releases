@@ -1,0 +1,160 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+          xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+          id="csvIngest"
+          name="CSV Ingest"
+          executionLabelExpression="csv ingest"
+          description="This workflow ingests assets and their metadata specified within a CSV file."
+          subjectDOClassName=""
+          adminOnly="true"
+          devWorkflow="true"
+          sdkVersion=""
+>
+
+    <initialStepName>convert csv to json</initialStepName>
+    
+
+    <setContextData name="convert csv to json"
+                    executionLabelExpression="converting csv to json"
+                    valueExpression="${#convertCsvToJson(csvFilePath)}"
+                    targetDataDef="csvJson"
+                    nextStep="check csv for contents" />
+
+    <noopStep name="check csv for contents"
+              executionLabelExpression="Checking csv for contents to ingest"
+              devStep="true">
+        <transition condition="${csvJson.size() &gt; 1}">
+            <targetStepName>query for running subflows</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>no items in csv</targetStepName>
+        </transition>
+    </noopStep>
+
+    <!--queue loop-->
+    <queryStep
+            name="query for running subflows"
+            targetDataObjectClass="WorkflowExecution"
+            resultDataDef="executingSubflows"
+            executionLabelExpression="checking for workflows (with id = ${subflowId} that are not in a finished state"
+            devStep="true">
+        <transition condition="${executingSubflows == null or executingSubflows.size() &lt; queueLimit}">
+            <targetStepName>increment counter</targetStepName>
+        </transition>
+        <transition condition="${ true }">
+            <targetStepName>queue full</targetStepName>
+        </transition>
+
+        <criteria>
+            <![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${subflowId}"/>
+                        </condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+        </criteria>
+    </queryStep>
+
+
+    <delayStep
+            name="queue full"
+            delaySecondsExpression="${queryPollInterval}"
+            executionLabelExpression="${executingSubflows.size()}/${queueLimit} running subflows (id = ${subflowId}). Waiting ${queryPollInterval} seconds. ${csvJson.size()} remaining items."
+            nextStep="query for running subflows"
+            devStep="true"/>
+
+    <setContextData
+            name="increment counter"
+            executionLabelExpression="Incrementing the counter..."
+            valueExpression="${counter + 1}"
+            targetDataDef="counter"
+            nextStep="ready next item"
+            devStep="true" />
+
+    <groovyStep
+            name="ready next item"
+            resultDataDef="fileToIngest"
+            executionLabelExpression="Preparing next item to ingest...3"
+            nextStep="ready metadata"
+            devStep="true"
+    >
+        <script>
+            <![CDATA[
+				return csvJson.get(counter.intValue()).get("filepathVideo")
+			]]>
+        </script>
+    </groovyStep>
+
+    <groovyStep
+            name="ready metadata"
+            resultDataDef="metadata"
+            executionLabelExpression="Preparing metadata to ingest..."
+            nextStep="process file"
+            devStep="true"
+    >
+        <script>
+            <![CDATA[
+				def metadataToIngest = csvJson.get(counter.intValue())
+
+				metadataToIngest.remove("filepathVideo")
+
+				return metadataToIngest
+			]]>
+        </script>
+    </groovyStep>
+
+    <executeSubflowStep name="process file"
+                        executionLabelExpression="Ingesting asset."
+                        targetWorkflowId="${subflowId}"
+                        subjectChangePath="${fileToIngest}"
+                        subflowTargetDataDef="fileToIngest"
+    >
+        <transition condition="${counter &lt; (csvJson.size() - 1)}">
+            <targetStepName>query for running subflows</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+
+        <subflowContextDataMapping parentDataDef="metadata" subflowDataDef="jsonMetadata" />
+    </executeSubflowStep>
+
+
+    <noopStep name="end" pctComplete="100"/>
+
+    <!--..........fail steps....................-->
+    <failWorkflowStep name="no items in csv"
+                      reasonExpression="There were no assets to ingest in this csv."
+                      executionLabelExpression="There were no assets found to ingest in this csv."/>
+
+    <contextDataDef name="csvFile" dataType="File" userInput="true" required="true" />
+    <contextDataDef name="csvFilePath" dataType="String" defaultDataExpression="${csvFile.absolutePath}" />
+    <contextDataDef name="csvJson" dataType="JSON" multiple="true" />
+    <contextDataDef name="assetMaster" dataType="Data Object" />
+    <contextDataDef name="result" dataType="Boolean" />
+    <contextDataDef name="counter" dataType="Integer" defaultDataExpression="0" />
+    <contextDataDef name="success" dataType="Boolean" />
+
+    <contextDataDef name="nextFiles"    		dataType="File"         multiple="true"/>
+    <contextDataDef name="executingSubflows" 	dataType="Data Object" 	multiple="true"/>
+    <contextDataDef name="queueLimit" 			dataType="Integer" 		defaultDataExpression="${#sysconfig('workflow.s3.ingest.queueLimit') ?: 51}"/>
+    <contextDataDef name="batchSize" 		    dataType="Integer" 		defaultDataExpression="${#sysconfig('workflow.s3.ingest.batchSize') ?: 25}"/>
+    <contextDataDef name="queryPollInterval"  	dataType="Integer" 		defaultDataExpression="${#sysconfig('workflow.s3.ingest.pollInterval') ?: 5}"/>
+    <contextDataDef name="subflowId"      	    dataType="String" 		defaultDataExpression="_anyAssetIngest"/>
+
+    <contextDataDef name="fileToIngest" dataType="File" />
+    <contextDataDef name="metadata" dataType="JSON" defaultDataExpression="{}" />
+
+   
+</workflow>

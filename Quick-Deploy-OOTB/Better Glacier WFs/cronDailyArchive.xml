@@ -1,0 +1,252 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+		  xmlns="http://levelsbeyond.com/schema/workflow"
+		  xsi:schemaLocation="
+	http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd
+	"
+		  id="cronDailyArchive"
+		  name="(Cron) Archive Assets - Daily"
+		  description="Archives assets to S3 to be put into Glacier"
+		  executionLabelExpression="Daily Automatic Archive"
+		  subjectDOClassName=""
+		  resultDataDef=""
+		  deadlineExpression=""
+		  sdkVersion="">
+	
+	<initialStepName>query existing execution</initialStepName>
+	
+	<queryStep name="query existing execution"
+			   targetDataObjectClass="WorkflowExecution"
+			   resultDataDef="existingExecution"
+			   executionLabelExpression="Checking for existing workflow execution with uuid ${ #this.workflow.uuid }, workflow key ${ #this.workflow.workflowVersion?.workflow?.key }">
+		<transition condition="${ existingExecution == null }">
+			<targetStepName>set original start time</targetStepName>
+		</transition>
+		<transition condition="${ true }">
+			<targetStepName>end</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+				<criteria>
+					<and>
+						<condition property="status" op="eq">
+							<test value="EXECUTING" />
+						</condition>
+						<condition property="workflowVersion.workflow.key" op="eq">
+							<test value="${ #this.workflow.workflowVersion.workflow.key }" />
+						</condition>
+						<condition property="uuid" op="noteq">
+							<test value="${ #this.workflow.uuid }" />
+						</condition>
+					</and>
+				</criteria>
+			]]>
+		</criteria>
+	</queryStep>
+	
+	<setContextData name="set original start time"
+					executionLabelExpression="Start Time: ${now.toString()}"
+					targetDataDef="now"
+					valueExpression="${#newDate()}"
+					nextStep="set end time"
+	/>
+	
+	<setContextData name="set end time"
+					executionLabelExpression="End Time: ${endTime.toString()}"
+					targetDataDef="endTime"
+					valueExpression="${#addMinutes(now, numOfMinutes)}"
+					nextStep="set current time"
+	/>
+	
+	<!-- ........................................... Query for Valid Assets .......................................... -->
+	
+	<setContextData name="set current time"
+					executionLabelExpression="Current Time: ${currentTime.toString()}"
+					targetDataDef="currentTime"
+					devStep="true"
+					valueExpression="${#newDate()}"
+	>
+		<transition condition="${currentTime &lt; endTime}">
+			<targetStepName>query asset masters</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</setContextData>
+	
+	<queryStep name="query asset masters"
+			   executionLabelExpression="Assets Found: ${queriedAssets.size()}"
+			   targetDataObjectClass="AssetMaster"
+			   resultDataDef="queriedAssets"
+			   fetchOffsetExpression="${queryOffset}"
+			   fetchLimitExpression="${assetsToExecute}"
+			   pctCompleteExpression="10"
+	>
+		<transition condition="${ queriedAssets.size() &gt; 0 }">
+			<targetStepName>remove truncated assets</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+		<criteria>
+			<![CDATA[
+				<criteria>
+					<and>
+						<condition property="contents.truncatedFlag" op="eq">
+                            <test value="false"/>
+                        </condition>
+                        <condition property="contents.contentUses" op="like">
+								<test value="%SOURCE%" />
+						</condition>
+						<condition property="dateUpdated" op="lt">
+                            <test value="${ #formatDate('w3c', targetTime) }"/>
+                        </condition>
+					</and>
+				</criteria>
+			]]>
+		</criteria>
+	</queryStep>
+	
+	<setContextData name="remove truncated assets"
+					targetDataDef="unfilteredAssetMasters"
+					valueExpression="${queriedAssets.?[!sourceContent.truncatedFlag]}"
+					executionLabelExpression="removing truncated assets... removed ${queriedAssets.size() - unfilteredAssetMasters.size()} truncated assets"
+	>
+		<transition condition="${unfilteredAssetMasters != null AND unfilteredAssetMasters.size() &gt; 0}">
+			<targetStepName>remove do not archive assets</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>increment offset</targetStepName>
+		</transition>
+	</setContextData>
+	
+	
+	<setContextData name="remove do not archive assets"
+					executionLabelExpression="Removing assets with 'Do Not Archive' flag. Removed ${unfilteredAssetMasters.size() - assetMasters.size()} assets with 'Do Not Archive' flag."
+					targetDataDef="assetMasters"
+					valueExpression="${unfilteredAssetMasters.?[metadata.doNotArchive != true]}"
+	>
+		<transition condition="${assetMasters != null AND assetMasters.size() &gt; 0}">
+			<targetStepName>query for running subflows</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>increment offset</targetStepName>
+		</transition>
+	</setContextData>
+	
+	<!-- Begin Queue Loop -->
+	
+	<setContextData name="set queue current time"
+					executionLabelExpression="Current Time: ${currentTime.toString()}"
+					targetDataDef="currentTime"
+					devStep="true"
+					valueExpression="${#newDate()}"
+	>
+		<transition condition="${currentTime &lt; endTime}">
+			<targetStepName>query for running subflows</targetStepName>
+		</transition>
+		<transition condition="${true}">
+			<targetStepName>end</targetStepName>
+		</transition>
+	</setContextData>
+	
+	<queryStep name="query for running subflows"
+			   targetDataObjectClass="WorkflowExecution"
+			   resultDataDef="executingSubflows"
+			   executionLabelExpression="checking for workflows (with id = ${subflowId}) that are also not in a finished state"
+			   devStep="true"
+			   nextStep="check running subflows"
+	>
+		<criteria>
+			<![CDATA[
+            <criteria>
+                <and>
+                     <condition property="workflowVersion.workflow.key" op="eq">
+                        <test value="${subflowId}"/>
+                    </condition>
+                    <condition property="executionLabel" op="like">
+						<test value="%${subflowLabel1}%" />
+					</condition>
+                    <condition property="status" op="in">
+                        <tests>
+                            <test value="CREATED" />
+                            <test value="QUEUED" />
+                            <test value="EXECUTING" />
+                         </tests>
+                    </condition>
+                </and>
+            </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+	<noopStep name="check running subflows"
+			  executionLabelExpression="number of subflows (id = ${subflowId}) running >>> ${executingSubflows.size()} out of ${queueLimit}"
+			  devStep="true"
+	>
+		<transition condition="${ executingSubflows.size() &lt; queueLimit }">
+			<targetStepName>archive asset masters</targetStepName>
+		</transition>
+		<transition condition="${ true }">
+			<targetStepName>queue full</targetStepName>
+		</transition>
+	</noopStep>
+	
+	<delayStep name="queue full"
+			   delaySecondsExpression="${ queryPollInterval }"
+			   executionLabelExpression="${batchToProcess.size()} nextBatch remaining | Subflows running: ${executingSubflows.size()}/${queueLimit} | Waiting ${queryPollInterval} seconds."
+			   nextStep="set queue current time"
+	/>
+	
+	<!-- ........................................... Archive Assets .......................................... -->
+	<executeSubflowStep name="archive asset masters"
+						targetWorkflowId="${subflowId}"
+						subjectChangePath="${ assetMasters }"
+						continueOnException="true"
+						waitForCompletionExpression="false"
+						executionLabelExpression="Archiving ${ assetMasters.size() } asset(s) to S3..."
+						nextStep="increment offset" />
+	
+	<!-- ........................................... Ending Steps .......................................... -->
+	
+	<setContextData name="increment offset"
+					targetDataDef="queryOffset"
+					devStep="true"
+					valueExpression="${queryOffset + assetsToExecute}"
+					nextStep="set current time" />
+	
+	<noopStep name="no assets found"
+			  executionLabelExpression="No assets were found needing to be archived."
+			  nextStep="end"/>
+	
+	<noopStep name="end" />
+	
+	<!-- ........................................... Context Data Defs .......................................... -->
+	<contextDataDef name="daysInterval" dataType="Integer" defaultDataExpression="${#sysconfig('workflows.cronDailyArchive.daysInterval') ?: 30}"/>
+	
+	<contextDataDef name="now" dataType="Date/Time" defaultDataExpression="${#newDate()}"/>
+	<contextDataDef name="targetTime" dataType="Date/Time" defaultDataExpression="${#addDays(now,-daysInterval)}"/>
+	
+	<contextDataDef name="queriedAssets" 		  dataType="Data Object"	multiple="true" />
+	<contextDataDef name="unfilteredAssetMasters" dataType="Data Object" 	multiple="true" />
+	<contextDataDef name="assetMasters" 		  dataType="Data Object" 	multiple="true" />
+	
+	<contextDataDef name="assetsToExecute" 			dataType="Integer" defaultDataExpression="${#sysconfig('workflows.cronDailyArchive.queryLimit') ?: 25}"/>
+	
+	<contextDataDef name="subflowLimit" 		dataType="Integer" 		defaultDataExpression="4" />
+	<contextDataDef name="existingExecution" 	dataType="Data Object" />
+	<contextDataDef name="groovyOutput"         dataType="Boolean"/>
+	
+	<!-- queue loop variables -->
+	<contextDataDef name="executingSubflows" dataType="Data Object" multiple="true" />
+	<contextDataDef name="queueLimit" dataType="Integer" defaultDataExpression="${#sysconfig('workflows.baseQueueLoop.queueLimit') ?: 25}" />
+	<contextDataDef name="queryPollInterval" dataType="Integer" defaultDataExpression="${#sysconfig('workflows.baseQueueLoop.queryPollInterval') ?: 10}" />
+	<contextDataDef name="subflowId"                dataType="String"       defaultDataExpression="filterDailyArchive" />
+	<contextDataDef name="subflowLabel1"            dataType="String"       defaultDataExpression="Filter Daily Archive" />
+	
+	<contextDataDef name="queryOffset" dataType="Integer" defaultDataExpression="0" />
+	
+	<contextDataDef name="currentTime"              dataType="Date/Time" />
+	<contextDataDef name="endTime"                  dataType="Date/Time" />
+	<contextDataDef name="numOfMinutes"             dataType="Integer" defaultDataExpression="${#sysconfig('workflows.cronDailyArchive.numOfMinutes') ?: 1}" />
+</workflow>

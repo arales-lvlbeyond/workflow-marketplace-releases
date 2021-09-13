@@ -1,0 +1,86 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2016 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xmlns="http://levelsbeyond.com/schema/workflow"
+    xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+    xsi:schemaLocation="http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd"
+    id="transferAsperaAuthToken"
+    name="Submit File via Aspera with Auth token"
+    executionLabelExpression="Submitting ${fileToUpload.name} to ${asperaDestination}"
+    description="Sends a file using Aspera authorized with token."
+    deadlineExpression=""
+    subjectDOClassName=""
+    showInUserInterface="false"
+    sdkVersion="5.4">
+
+    <initialStepName>send via aspera</initialStepName>
+  
+
+    <runCommandStep name="send via aspera"
+      executionLabelExpression="Sending ${fileToUpload.name} to ${asperaDestination}${packageName} via Aspera"
+      executablePathExpression="${ascpLocation}"
+      resultCodeDataDef="asperaResultCode"
+      stdoutDataDef="asperaStdOut"
+      stderrDataDef="asperaStdErr"
+      nextStep="print results"
+      >
+      <arg>-W</arg>
+      <arg>${authToken}</arg>
+      <arg>-P</arg>
+      <arg>33001</arg>
+      <arg>-O</arg>
+      <arg>33001</arg>
+      <arg>--remove-after-transfer</arg>
+      <arg>-d</arg>
+      <arg>-L</arg>
+      <arg>/reachengine/utilities/aspera</arg>
+      <arg>-i</arg>
+      <arg>${credsFile}</arg>
+      <arg>${fileToUpload.absolutePath}</arg>
+      <arg>${asperaDestination}${packageName}</arg>
+  </runCommandStep>
+  
+  <!-- Print results from command to the logs -->
+  <testStep name="print results" 
+    executionLabelExpression="Printing the results from the command to the RE log"
+    outputExpression="Aspera Result Code >>> ${asperaResultCode}  Aspera Std Out >>> ${asperaStdOut} Aspera Std Err >>> ${asperaStdErr}" 
+    nextStep="end"
+    />
+  
+    
+    <!-- ........................................... Ending Steps .......................................... -->
+    <noopStep name="end"/>
+    
+    <!-- ........................................ Context Data Defs ........................................ -->
+    <!-- User Input -->
+    <contextDataDef name="fileToUpload" 		dataType="File"			userInput="true"/>
+    
+    <!-- Processing Data Defs -->
+    <contextDataDef name="asperaResultCode"     dataType="String"/>
+    <contextDataDef name="asperaStdOut"         dataType="String"       multiple="true"/>
+    <contextDataDef name="asperaStdErr"         dataType="String"       multiple="true"/>
+    <contextDataDef name="credsFile"            dataType="String"       hidden="true"/>
+    
+    <!-- Variables -->
+    <contextDataDef name="asperaDestination"    dataType="String"/>
+    <contextDataDef name="ascpLocation"         dataType="String"       defaultDataExpression="${#sysconfig('workflows.transferAspera.ascpLocation')}"/>
+    <contextDataDef name="authToken"            dataType="String"       hidden="true"/>
+    <contextDataDef name="packageName" 			dataType="String"/>
+
+  
+</workflow>

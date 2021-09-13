@@ -1,0 +1,109 @@
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xmlns="http://levelsbeyond.com/schema/workflow"
+          xsi:schemaLocation="
+	http://levelsbeyond.com/schema/workflow http://www.levelsbeyond.com/schema/latest/studio.xsd
+	"
+          id="filterDailyArchive"
+          name="Filter Daily Archive"
+          description="Checks if source content of asset queried by cronDailyArchive has been accessed before a specified date before archiving"
+          executionLabelExpression="Checking if ${asset.name} source content has been modified within ${daysInterval} days..."
+          showInUserInterface="false"
+          adminOnly="true"
+          subjectDOClassName="AssetMaster"
+          resultDataDef=""
+          deadlineExpression=""
+          sdkVersion="">
+    
+    <initialStepName>check if file exists</initialStepName>
+    
+    <noopStep name="check if file exists"
+              executionLabelExpression="checking if file exists"
+    >
+        <transition condition="${uploadFile.exists()}">
+            <targetStepName>get last accessed date</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>file does not exist</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <!-- Run a command to get the date that the source file was last accessed -->
+    <runCommandStep name="get last accessed date"
+                    executionLabelExpression="Run a command to get the Epoch time that the source file was last accessed. Last accessed Epoch time: ${epochString}"
+                    executablePathExpression="/bin/sh"
+                    stdoutDataDef="epochString"
+                    nextStep="set to double"
+    >
+        <arg>-c</arg>
+        <arg>stat -c '%Y' "${uploadFilePath}"</arg>
+    </runCommandStep>
+    
+    
+    
+    <!-- Set the last accessed epoch date to a double data def -->
+    <setContextData name="set to double"
+                    executionLabelExpression="Set Epoch time to Double data def >>> ${lastAccessedEpoch}"
+                    nextStep="set last accessed date"
+    >
+        <set targetDataDef="lastAccessedEpoch" valueExpression="${T(java.lang.Double).parseDouble(epochString)}"/>
+    </setContextData>
+    
+    
+    
+    <!-- Convert Epoch time to date data def -->
+    <groovyStep name="set last accessed date"
+                executionLabelExpression="Set the last accessed date >>> ${lastAccessedDate.toString()}"
+                pctCompleteExpression="${ T(java.lang.Math).round(T(java.lang.Double).parseDouble( wfExe.stepExecutions.size() ) / T(java.lang.Double).parseDouble( wfExe.workflowVersion.steps.size() ) * 100) }"
+                resultDataDef="lastAccessedDate"
+                nextStep="check date"
+    >
+        <script>
+            <![CDATA[
+                long epochTime = lastAccessedEpoch*1000;
+                Date date = new Date(epochTime);
+                return date;
+            ]]>
+        </script>
+    </groovyStep>
+    
+    
+    
+    <!-- Check if file was last accessed over 30 days ago -->
+    <noopStep name="check date"
+              executionLabelExpression="Check if it has been over 30 days since the file was last accessed. >>> ${lastAccessedDate &lt; #addDays(#newDate(), -30)}"
+    >
+        <transition condition="${lastAccessedDate &lt; #addDays(#newDate(), -daysInterval)}">
+            <targetStepName>archive asset master</targetStepName>
+        </transition>
+        <transition condition="${true}">
+            <targetStepName>end</targetStepName>
+        </transition>
+    </noopStep>
+    
+    <!-- ........................................... Archive Assets .......................................... -->
+    <executeSubflowStep name="archive asset master"
+                        targetWorkflowId="archiveAssetToGlacier"
+                        subjectChangePath="${asset}"
+                        executionLabelExpression="Archiving asset to Glacier..."
+                        nextStep="end" />
+    
+    <noopStep name="end" />
+    
+    <noopStep name="file does not exist" />
+    
+    <!-- ........................................... Context Data Defs .......................................... -->
+    <contextDataDef name="asset"              dataType="Data Object" defaultDataExpression="${subject}" />
+    
+    <contextDataDef name="uploadFilePath"     dataType="String" defaultDataExpression="${subject.sourceContent.file.absolutePath}"/>
+    <contextDataDef name="uploadFile"         dataType="File" defaultDataExpression="${uploadFilePath}" />
+    
+    <!-- std out from query for access date on source file -->
+    <contextDataDef name="epochString"        dataType="String"/>
+    <!-- Time the source file was last accessed in Epoch time -->
+    <contextDataDef name="lastAccessedEpoch"  dataType="Double"/>
+    <!-- Time the source file was last accessed in date/time -->
+    <contextDataDef name="lastAccessedDate"   dataType="Date/Time"/>
+    
+    <contextDataDef name="daysInterval"       dataType="Integer" defaultDataExpression="${#sysconfig('workflows.filterDailyArchive.daysInterval') ?: 30}" />
+    
+</workflow>

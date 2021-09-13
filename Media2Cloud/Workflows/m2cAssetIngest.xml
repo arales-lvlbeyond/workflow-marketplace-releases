@@ -1,0 +1,129 @@
+<!--
+  ~ Levels Beyond CONFIDENTIAL
+  ~
+  ~ Copyright 2003 - 2018 Levels Beyond Incorporated
+  ~ All Rights Reserved.
+  ~
+  ~ NOTICE:  All information contained herein is, and remains
+  ~ the property of Levels Beyond Incorporated and its suppliers,
+  ~ if any.  The intellectual and technical concepts contained
+  ~ herein are proprietary to Levels Beyond Incorporated
+  ~ and its suppliers and may be covered by U.S. and Foreign Patents,
+  ~ patents in process, and are protected by trade secret or copyright law.
+  ~ Dissemination of this information or reproduction of this material
+  ~ is unlawful and strictly forbidden unless prior written permission is obtained
+  ~ from Levels Beyond Incorporated.
+  -->
+
+<workflow xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns="http://levelsbeyond.com/schema/workflow"
+	xmlns:nimbus="http://levelsbeyond.com/schema/workflow/nimbus"
+	xsi:schemaLocation="http://levelsbeyond.com/schema/latest http://levelsbeyond.com/schema/latest/studio.xsd"
+	id="m2cAssetIngest"
+	name="Media2Cloud Asset Ingest"
+	executionLabelExpression="Media2Cloud Asset Ingest | File: ${fileToIngest.absolutePath}"
+	description=""
+	subjectDOClassName=""
+	resultDataDef="assetMaster"
+	deadlineExpression=""
+	showInUserInterface="true"
+	sdkVersion="5.21"
+	>
+
+	<initialStepName>check if workflow is running</initialStepName>
+
+
+
+	<queryStep name="check if workflow is running"
+		targetDataObjectClass="WorkflowExecution"
+		resultDataDef="currentExecutions"
+		executionLabelExpression="Is a workflow running on this file already? ${currentExecutions.size() != 0}"
+		pctComplete="5"
+		>
+		<transition condition="${currentExecutions.size() == 0}">
+			<targetStepName>copy asset to s3</targetStepName>
+		</transition>
+		<transition condition="true">
+			<targetStepName>workflow is running</targetStepName>
+		</transition>
+		
+		<criteria>
+			<![CDATA[
+                <criteria>
+                    <and>
+                        <condition property="workflowVersion.workflow.key" op="eq">
+                            <test value="${ #this.workflow.workflowVersion.workflow.key }" />
+                        </condition>
+                        <condition property="uuid" op="noteq">
+                            <test value="${ #this.workflow.uuid }" />
+                        </condition>
+                        <condition property="executionLabel" op="like">
+							<test value="%${fileToIngest.absolutePath}%" />
+						</condition>
+                        <condition property="status" op="in">
+                            <tests>
+                                <test value="CREATED" />
+                                <test value="QUEUED" />
+                                <test value="EXECUTING" />
+                            </tests>
+                        </condition>
+                    </and>
+                </criteria>
+            ]]>
+		</criteria>
+	</queryStep>
+	
+    <runCommandStep
+		name="copy asset to s3"
+		executionLabelExpression="Copy file ${sourceFile} to s3://${m2cIngestBucket}/${#baseFilename(fileToIngest.file)}/"
+		executablePathExpression="/usr/bin/aws"
+		resultDataDef="stdoutDataDef"
+		nextStep="Display stdoutDataDef">
+			<arg>s3</arg>
+			<arg>cp</arg>
+			<arg>${sourceFile}</arg>
+			<arg>s3://${m2cIngestBucket}/${#baseFilename(fileToIngest.file)}/</arg>
+	</runCommandStep>
+	
+<!-- 	<copyFileStep 
+        name="copy asset to s3"
+        executionLabelExpression="Copy file ${sourceFile} to ${userSelectedBucketPath}"
+        sourceFileExpression="${sourceFile}"
+        targetDirectoryExpression="${userSelectedBucketPath}"
+        resultDataDef="stdoutDataDef"
+        nextStep="Display stdoutDataDef"
+        />
+ -->
+    <noopStep name="Display stdoutDataDef" executionLabelExpression="${stdoutDataDef}" devStep="true" nextStep="end" />
+	
+	<!-- ................................................... End Steps .................................................... -->
+	<!-- success -->
+	<noopStep name="end"	pctComplete="100"/>
+	
+	
+	<!-- fail -->
+	<failWorkflowStep name="workflow is running"
+		executionLabelExpression="Workflow already executing on the file"
+		reasonExpression="Workflow already executing on the file"
+		/>
+	
+	
+	<!-- ............................................... Context Data Defs ................................................ -->
+	<!-- ....... User Input Variables ........ -->
+	<contextDataDef name="fileToIngest" 		    dataType="File"				userInput="true"    label="File To Ingest (Local or S3)"   required="true"/>
+	
+	<!-- ....... Processing Variables ........ -->
+    <contextDataDef name="m2cIngestBucket"          dataType="String"               defaultDataExpression="${#sysconfig('s3bucket.m2cIngest.name')}" />
+	<contextDataDef name="currentExecutions" 	    dataType="Data Object" 	    multiple="true"/>
+	<contextDataDef name="assetMaster" 			    dataType="Data Object"/>
+    <contextDataDef name="userSelectedBucketPath"       dataType="String"           defaultDataExpression="s3:${m2cIngestBucket}:/${#baseFilename(fileToIngest.file)}/"/>
+    <contextDataDef name="stdoutDataDef"                         dataType="String"           hidden="true"/>
+    <contextDataDef name="sourceFile"           dataType="String"       defaultDataExpression="${#mapPath(fileToIngest.absolutePath, 's3mapping')}"/>
+
+	<!-- ..... Deprecated But Supported ...... -->
+	<contextDataDef name="assetForVersioning"       dataType="Data Object"/>
+	<contextDataDef name="skipMezzanineFlag"        dataType="Boolean"/>
+	<contextDataDef name="allowDuplicateNamesFlag"  dataType="Boolean"/>
+	<contextDataDef name="versionName"              dataType="String"/>
+	
+</workflow>
